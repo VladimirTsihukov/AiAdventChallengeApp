@@ -1,4 +1,4 @@
-package com.tishukoff.aiadventchallengeapp.ui.theme
+package com.tishukoff.aiadventchallengeapp.presentation.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
