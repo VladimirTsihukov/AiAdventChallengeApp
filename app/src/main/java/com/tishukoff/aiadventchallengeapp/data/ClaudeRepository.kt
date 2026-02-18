@@ -34,6 +34,9 @@ class ClaudeRepository {
                 put("model", "claude-sonnet-4-5-20250929")
                 put("max_tokens", settings.maxTokens)
                 put("temperature", settings.temperature.toDouble())
+                if (settings.systemPrompt.isNotBlank()) {
+                    put("system", settings.systemPrompt)
+                }
                 put("messages", messagesArray)
                 if (settings.stopSequences.isNotEmpty()) {
                     put("stop_sequences", JSONArray(settings.stopSequences))

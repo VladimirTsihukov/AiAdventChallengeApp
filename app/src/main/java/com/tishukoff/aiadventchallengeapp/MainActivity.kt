@@ -22,7 +22,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
-import com.tishukoff.aiadventchallengeapp.data.SettingsDrawer
+import com.tishukoff.aiadventchallengeapp.presentation.ui.components.SettingsDrawer
 import com.tishukoff.aiadventchallengeapp.presentation.ChatViewModel
 import com.tishukoff.aiadventchallengeapp.presentation.ui.components.ChatScreen
 import com.tishukoff.aiadventchallengeapp.presentation.ui.models.ChatIntent
