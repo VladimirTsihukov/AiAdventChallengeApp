@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tishukoff.aiadventchallengeapp.data.ClaudeRepository
+import com.tishukoff.aiadventchallengeapp.data.ResponseMetadata
 import com.tishukoff.aiadventchallengeapp.data.SettingsRepository
 import com.tishukoff.aiadventchallengeapp.presentation.ui.models.ChatIntent
 import com.tishukoff.aiadventchallengeapp.presentation.ui.models.ChatMessage
@@ -12,6 +13,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.util.Locale
 
 class ChatViewModel(
     private val repository: ClaudeRepository,
@@ -38,6 +40,13 @@ class ChatViewModel(
         }
     }
 
+    private fun formatMetadata(metadata: ResponseMetadata): String {
+        val timeSec = metadata.responseTimeMs / 1000.0
+        val cost = String.format(Locale.US, "%.4f", metadata.costUsd)
+        val time = String.format(Locale.US, "%.1f", timeSec)
+        return "${metadata.modelId} | in: ${metadata.inputTokens} out: ${metadata.outputTokens} | ${time}s | \$$cost"
+    }
+
     private fun sendMessage() {
         val message = _uiState.value.input.trim()
         if (message.isBlank()) return
@@ -52,13 +61,22 @@ class ChatViewModel(
         )
 
         viewModelScope.launch {
-            val result = try {
-                repository.sendMessage(updatedMessages, _uiState.value.settings)
+            val aiMessage = try {
+                val (text, metadata) = repository.sendMessage(
+                    updatedMessages,
+                    _uiState.value.settings
+                )
+                val metadataText = formatMetadata(metadata)
+                Log.d("Logger_2", "result message:\n$text")
+                Log.d("Logger_2", "result metadata:\n$metadataText")
+                ChatMessage(
+                    text = text,
+                    isUser = false,
+                    metadataText = metadataText
+                )
             } catch (e: Exception) {
-                "Error: ${e.message}"
+                ChatMessage(text = "Error: ${e.message}", isUser = false)
             }
-            Log.d("Logger_2","result:\n$result")
-            val aiMessage = ChatMessage(text = result, isUser = false)
             _uiState.value = _uiState.value.copy(
                 isLoading = false,
                 messages = _uiState.value.messages + aiMessage

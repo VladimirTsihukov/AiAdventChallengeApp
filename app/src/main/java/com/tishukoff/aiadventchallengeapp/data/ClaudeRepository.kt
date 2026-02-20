@@ -19,8 +19,12 @@ class ClaudeRepository {
         .readTimeout(60, TimeUnit.SECONDS)
         .build()
 
-    suspend fun sendMessage(conversation: List<ChatMessage>, settings: LlmSettings): String {
+    suspend fun sendMessage(
+        conversation: List<ChatMessage>,
+        settings: LlmSettings
+    ): Pair<String, ResponseMetadata> {
         return withContext(Dispatchers.IO) {
+            val model = settings.model
             val messagesArray = JSONArray().apply {
                 for (msg in conversation) {
                     put(JSONObject().apply {
@@ -31,7 +35,7 @@ class ClaudeRepository {
             }
 
             val jsonBody = JSONObject().apply {
-                put("model", "claude-sonnet-4-5-20250929")
+                put("model", model.apiId)
                 put("max_tokens", settings.maxTokens)
                 put("temperature", settings.temperature.toDouble())
                 if (settings.systemPrompt.isNotBlank()) {
@@ -51,17 +55,35 @@ class ClaudeRepository {
                 .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
                 .build()
 
+            val startTime = System.currentTimeMillis()
             val response = client.newCall(request).execute()
+            val elapsed = System.currentTimeMillis() - startTime
             val body = response.body?.string() ?: "Empty response"
 
             if (response.isSuccessful) {
                 val json = JSONObject(body)
                 val content = json.getJSONArray("content")
-                if (content.length() > 0) {
+                val text = if (content.length() > 0) {
                     content.getJSONObject(0).getString("text")
                 } else {
                     "Empty response from Claude"
                 }
+
+                val usage = json.getJSONObject("usage")
+                val inputTokens = usage.getInt("input_tokens")
+                val outputTokens = usage.getInt("output_tokens")
+                val cost = inputTokens * model.inputPricePerMillion / 1_000_000 +
+                        outputTokens * model.outputPricePerMillion / 1_000_000
+
+                val metadata = ResponseMetadata(
+                    modelId = model.apiId,
+                    inputTokens = inputTokens,
+                    outputTokens = outputTokens,
+                    responseTimeMs = elapsed,
+                    costUsd = cost
+                )
+
+                Pair(text, metadata)
             } else {
                 error("Error ${response.code}: $body")
             }
