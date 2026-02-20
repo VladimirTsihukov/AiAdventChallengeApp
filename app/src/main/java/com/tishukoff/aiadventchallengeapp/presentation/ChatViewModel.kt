@@ -1,5 +1,6 @@
 package com.tishukoff.aiadventchallengeapp.presentation
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tishukoff.aiadventchallengeapp.data.ClaudeRepository
@@ -56,6 +57,7 @@ class ChatViewModel(
             } catch (e: Exception) {
                 "Error: ${e.message}"
             }
+            Log.d("Logger_2","result:\n$result")
             val aiMessage = ChatMessage(text = result, isUser = false)
             _uiState.value = _uiState.value.copy(
                 isLoading = false,

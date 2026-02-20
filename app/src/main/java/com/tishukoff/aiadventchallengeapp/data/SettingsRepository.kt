@@ -13,7 +13,8 @@ class SettingsRepository(private val prefs: SharedPreferences) {
                 ?.split(",")
                 ?.map { it.trim() }
                 ?.filter { it.isNotEmpty() }
-                ?: emptyList()
+                ?: emptyList(),
+            systemPrompt = prefs.getString(KEY_SYSTEM_PROMPT, "") ?: ""
         )
     }
 
@@ -22,6 +23,7 @@ class SettingsRepository(private val prefs: SharedPreferences) {
             putInt(KEY_MAX_TOKENS, settings.maxTokens)
                 .putFloat(KEY_TEMPERATURE, settings.temperature)
                 .putString(KEY_STOP_SEQUENCES, settings.stopSequences.joinToString(","))
+                .putString(KEY_SYSTEM_PROMPT, settings.systemPrompt)
         }
     }
 
@@ -29,5 +31,6 @@ class SettingsRepository(private val prefs: SharedPreferences) {
         const val KEY_MAX_TOKENS = "llm_max_tokens"
         const val KEY_TEMPERATURE = "llm_temperature"
         const val KEY_STOP_SEQUENCES = "llm_stop_sequences"
+        const val KEY_SYSTEM_PROMPT = "llm_system_prompt"
     }
 }
