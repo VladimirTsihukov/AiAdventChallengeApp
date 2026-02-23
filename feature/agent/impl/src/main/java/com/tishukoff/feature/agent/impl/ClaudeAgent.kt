@@ -1,7 +1,9 @@
-package com.tishukoff.aiadventchallengeapp.data
+package com.tishukoff.feature.agent.impl
 
-import com.tishukoff.aiadventchallengeapp.BuildConfig
-import com.tishukoff.aiadventchallengeapp.presentation.ui.models.ChatMessage
+import com.tishukoff.feature.agent.api.Agent
+import com.tishukoff.feature.agent.api.ChatMessage
+import com.tishukoff.feature.agent.api.LlmSettings
+import com.tishukoff.feature.agent.api.ResponseMetadata
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -10,23 +12,63 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
-class ClaudeRepository {
+internal class ClaudeAgent(
+    private val apiKey: String,
+    private val settingsRepository: SettingsRepository
+) : Agent {
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .build()
 
-    suspend fun sendMessage(
-        conversation: List<ChatMessage>,
-        settings: LlmSettings
-    ): Pair<String, ResponseMetadata> {
+    private val _conversationHistory = mutableListOf<ChatMessage>()
+    override val conversationHistory: List<ChatMessage> get() = _conversationHistory
+
+    override var settings: LlmSettings = settingsRepository.load()
+        private set
+
+    override fun updateSettings(newSettings: LlmSettings) {
+        settings = newSettings
+        settingsRepository.save(newSettings)
+    }
+
+    override fun addUserMessage(text: String): ChatMessage {
+        val message = ChatMessage(text = text, isUser = true)
+        _conversationHistory.add(message)
+        return message
+    }
+
+    override suspend fun processRequest(): ChatMessage {
+        return try {
+            val (text, metadata) = callApi()
+            val metadataText = formatMetadata(metadata)
+            val response = ChatMessage(
+                text = text,
+                isUser = false,
+                metadataText = metadataText
+            )
+            _conversationHistory.add(response)
+            response
+        } catch (e: Exception) {
+            val errorMessage = ChatMessage(text = "Error: ${e.message}", isUser = false)
+            _conversationHistory.add(errorMessage)
+            errorMessage
+        }
+    }
+
+    override fun clearHistory() {
+        _conversationHistory.clear()
+    }
+
+    private suspend fun callApi(): Pair<String, ResponseMetadata> {
         return withContext(Dispatchers.IO) {
             val model = settings.model
             val messagesArray = JSONArray().apply {
-                for (msg in conversation) {
+                for (msg in _conversationHistory) {
                     put(JSONObject().apply {
                         put("role", if (msg.isUser) "user" else "assistant")
                         put("content", msg.text)
@@ -49,7 +91,7 @@ class ClaudeRepository {
 
             val request = Request.Builder()
                 .url("https://api.anthropic.com/v1/messages")
-                .addHeader("x-api-key", BuildConfig.ANTHROPIC_API_KEY)
+                .addHeader("x-api-key", apiKey)
                 .addHeader("anthropic-version", "2023-06-01")
                 .addHeader("content-type", "application/json")
                 .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
@@ -88,5 +130,12 @@ class ClaudeRepository {
                 error("Error ${response.code}: $body")
             }
         }
+    }
+
+    private fun formatMetadata(metadata: ResponseMetadata): String {
+        val timeSec = metadata.responseTimeMs / 1000.0
+        val cost = String.format(Locale.US, "%.4f", metadata.costUsd)
+        val time = String.format(Locale.US, "%.1f", timeSec)
+        return "${metadata.modelId} | in: ${metadata.inputTokens} out: ${metadata.outputTokens} | ${time}s | \$$cost"
     }
 }

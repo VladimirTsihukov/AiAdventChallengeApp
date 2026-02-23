@@ -1,8 +1,8 @@
 import java.util.Properties
 
 plugins {
-    alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.compose)
+    id("aiadvent.android.application")
+    id("aiadvent.android.compose")
 }
 
 val localProperties = Properties().apply {
@@ -12,14 +12,9 @@ val localProperties = Properties().apply {
 
 android {
     namespace = "com.tishukoff.aiadventchallengeapp"
-    compileSdk {
-        version = release(36)
-    }
 
     defaultConfig {
         applicationId = "com.tishukoff.aiadventchallengeapp"
-        minSdk = 26
-        targetSdk = 36
         versionCode = 1
         versionName = "1.0"
 
@@ -32,26 +27,15 @@ android {
         )
     }
 
-    buildTypes {
-        release {
-            isMinifyEnabled = false
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
-        }
-    }
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
-    }
     buildFeatures {
-        compose = true
         buildConfig = true
     }
 }
 
 dependencies {
+    implementation(project(":core:designsystem"))
+    implementation(project(":feature:agent:api"))
+    implementation(project(":feature:agent:impl"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)

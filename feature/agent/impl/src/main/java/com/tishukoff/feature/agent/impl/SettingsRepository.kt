@@ -1,9 +1,11 @@
-package com.tishukoff.aiadventchallengeapp.data
+package com.tishukoff.feature.agent.impl
 
 import android.content.SharedPreferences
 import androidx.core.content.edit
+import com.tishukoff.feature.agent.api.ClaudeModel
+import com.tishukoff.feature.agent.api.LlmSettings
 
-class SettingsRepository(private val prefs: SharedPreferences) {
+internal class SettingsRepository(private val prefs: SharedPreferences) {
 
     fun load(): LlmSettings {
         val modelName = prefs.getString(KEY_MODEL, ClaudeModel.SONNET.name) ?: ClaudeModel.SONNET.name

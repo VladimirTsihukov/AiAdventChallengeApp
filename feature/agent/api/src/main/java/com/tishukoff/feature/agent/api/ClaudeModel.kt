@@ -1,4 +1,4 @@
-package com.tishukoff.aiadventchallengeapp.data
+package com.tishukoff.feature.agent.api
 
 enum class ClaudeModel(
     val apiId: String,

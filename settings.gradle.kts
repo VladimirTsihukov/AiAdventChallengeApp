@@ -1,4 +1,5 @@
 pluginManagement {
+    includeBuild("build-logic")
     repositories {
         google {
             content {
@@ -21,3 +22,6 @@ dependencyResolutionManagement {
 
 rootProject.name = "AiAdventChallengeApp"
 include(":app")
+include(":core:designsystem")
+include(":feature:agent:api")
+include(":feature:agent:impl")

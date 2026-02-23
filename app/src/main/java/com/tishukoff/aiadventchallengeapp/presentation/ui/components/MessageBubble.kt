@@ -15,7 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
-import com.tishukoff.aiadventchallengeapp.presentation.ui.models.ChatMessage
+import com.tishukoff.feature.agent.api.ChatMessage
 
 internal val BubbleShape = RoundedCornerShape(16.dp)
 
@@ -49,9 +49,10 @@ fun MessageBubble(message: ChatMessage) {
                 )
             }
 
-            if (message.metadataText != null) {
+            val metadata = message.metadataText
+            if (metadata != null) {
                 Text(
-                    text = message.metadataText,
+                    text = metadata,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                     modifier = Modifier.padding(start = 8.dp, top = 4.dp)
