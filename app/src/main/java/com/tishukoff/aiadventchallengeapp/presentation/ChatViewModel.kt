@@ -8,14 +8,28 @@ import com.tishukoff.aiadventchallengeapp.presentation.ui.models.ChatUiState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 
 class ChatViewModel(
     private val agent: Agent
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(ChatUiState(settings = agent.settings))
+    private val _uiState = MutableStateFlow(ChatUiState())
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
+
+    init {
+        agent.conversationHistory
+            .onEach { messages ->
+                _uiState.value = _uiState.value.copy(messages = messages)
+            }
+            .launchIn(viewModelScope)
+
+        viewModelScope.launch {
+            agent.loadHistory()
+        }
+    }
 
     fun handleIntent(intent: ChatIntent) {
         when (intent) {
@@ -23,10 +37,13 @@ class ChatViewModel(
                 _uiState.value = _uiState.value.copy(input = intent.text)
             }
             is ChatIntent.SendMessage -> sendMessage()
-            is ChatIntent.SaveSettings -> {
-                agent.updateSettings(intent.settings)
-                _uiState.value = _uiState.value.copy(settings = intent.settings)
-            }
+            is ChatIntent.ClearHistory -> clearHistory()
+        }
+    }
+
+    private fun clearHistory() {
+        viewModelScope.launch {
+            agent.clearHistory()
         }
     }
 
@@ -34,19 +51,15 @@ class ChatViewModel(
         val message = _uiState.value.input.trim()
         if (message.isBlank()) return
 
-        agent.addUserMessage(message)
         _uiState.value = _uiState.value.copy(
             isLoading = true,
-            input = "",
-            messages = agent.conversationHistory
+            input = ""
         )
 
         viewModelScope.launch {
+            agent.addUserMessage(message)
             agent.processRequest()
-            _uiState.value = _uiState.value.copy(
-                isLoading = false,
-                messages = agent.conversationHistory
-            )
+            _uiState.value = _uiState.value.copy(isLoading = false)
         }
     }
 }

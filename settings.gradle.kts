@@ -23,5 +23,9 @@ dependencyResolutionManagement {
 rootProject.name = "AiAdventChallengeApp"
 include(":app")
 include(":core:designsystem")
+include(":core:database:api")
+include(":core:database:impl")
 include(":feature:agent:api")
 include(":feature:agent:impl")
+include(":feature:setting:api")
+include(":feature:setting:impl")

@@ -24,28 +24,27 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.State
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
-import com.tishukoff.aiadventchallengeapp.presentation.ChatViewModel
 import com.tishukoff.aiadventchallengeapp.presentation.ui.models.ChatIntent
+import com.tishukoff.aiadventchallengeapp.presentation.ui.models.ChatUiState
 
 @Composable
 fun ChatScreen(
     modifier: Modifier = Modifier,
-    viewModel: ChatViewModel
+    state: State<ChatUiState>,
+    onIntent: (ChatIntent) -> Unit,
 ) {
-    val state by viewModel.uiState.collectAsState()
     val listState = rememberLazyListState()
-
+    val stateValue = state.value
     // Auto-scroll to the latest message
-    LaunchedEffect(state.messages.size) {
-        if (state.messages.isNotEmpty()) {
-            listState.animateScrollToItem(state.messages.lastIndex)
+    LaunchedEffect(stateValue.messages.size) {
+        if (stateValue.messages.isNotEmpty()) {
+            listState.animateScrollToItem(stateValue.messages.lastIndex)
         }
     }
 
@@ -60,7 +59,7 @@ fun ChatScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(vertical = 12.dp)
         ) {
-            if (state.messages.isEmpty() && !state.isLoading) {
+            if (stateValue.messages.isEmpty() && !stateValue.isLoading) {
                 item {
                     Box(
                         modifier = Modifier
@@ -76,11 +75,11 @@ fun ChatScreen(
                 }
             }
 
-            items(state.messages) { message ->
+            items(stateValue.messages) { message ->
                 MessageBubble(message = message)
             }
 
-            if (state.isLoading) {
+            if (stateValue.isLoading) {
                 item {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -105,22 +104,17 @@ fun ChatScreen(
 
         // Input field at the bottom
         OutlinedTextField(
-            value = state.input,
-            onValueChange = { viewModel.handleIntent(ChatIntent.UpdateInput(it)) },
+            value = stateValue.input,
+            onValueChange = { onIntent(ChatIntent.UpdateInput(it)) },
             placeholder = { Text("Message") },
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             trailingIcon = {
-                if (state.isLoading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(24.dp),
-                        strokeWidth = 2.dp
-                    )
-                } else {
+                if (stateValue.isLoading.not()) {
                     IconButton(
-                        onClick = { viewModel.handleIntent(ChatIntent.SendMessage) },
-                        enabled = state.input.isNotBlank(),
+                        onClick = { onIntent(ChatIntent.SendMessage) },
+                        enabled = stateValue.input.isNotBlank(),
                         colors = IconButtonDefaults.iconButtonColors(
                             contentColor = MaterialTheme.colorScheme.primary
                         )

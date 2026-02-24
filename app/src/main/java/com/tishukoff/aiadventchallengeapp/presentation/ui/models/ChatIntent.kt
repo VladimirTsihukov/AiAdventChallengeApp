@@ -1,9 +1,7 @@
 package com.tishukoff.aiadventchallengeapp.presentation.ui.models
 
-import com.tishukoff.feature.agent.api.LlmSettings
-
 sealed interface ChatIntent {
     data class UpdateInput(val text: String) : ChatIntent
     data object SendMessage : ChatIntent
-    data class SaveSettings(val settings: LlmSettings) : ChatIntent
+    data object ClearHistory : ChatIntent
 }

@@ -3,6 +3,7 @@ import java.util.Properties
 plugins {
     id("aiadvent.android.application")
     id("aiadvent.android.compose")
+    alias(libs.plugins.kotlin.serialization)
 }
 
 val localProperties = Properties().apply {
@@ -34,8 +35,11 @@ android {
 
 dependencies {
     implementation(project(":core:designsystem"))
+    implementation(project(":core:database:impl"))
     implementation(project(":feature:agent:api"))
     implementation(project(":feature:agent:impl"))
+    implementation(project(":feature:setting:api"))
+    implementation(project(":feature:setting:impl"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
@@ -48,6 +52,10 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.koin.android)
     implementation(libs.koin.androidx.compose)
+    implementation(libs.androidx.navigation3.runtime)
+    implementation(libs.androidx.navigation3.ui)
+    implementation(libs.androidx.lifecycle.viewmodel.navigation3)
+    implementation(libs.kotlinx.serialization.core)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

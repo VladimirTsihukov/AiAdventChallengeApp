@@ -1,10 +1,16 @@
 package com.tishukoff.feature.agent.impl
 
+import com.tishukoff.core.database.api.ChatHistoryStorage
+import com.tishukoff.core.database.api.ChatMessageRecord
 import com.tishukoff.feature.agent.api.Agent
 import com.tishukoff.feature.agent.api.ChatMessage
 import com.tishukoff.feature.agent.api.LlmSettings
 import com.tishukoff.feature.agent.api.ResponseMetadata
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -17,7 +23,8 @@ import java.util.concurrent.TimeUnit
 
 internal class ClaudeAgent(
     private val apiKey: String,
-    private val settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository,
+    private val chatHistoryStorage: ChatHistoryStorage,
 ) : Agent {
 
     private val client = OkHttpClient.Builder()
@@ -25,8 +32,8 @@ internal class ClaudeAgent(
         .readTimeout(60, TimeUnit.SECONDS)
         .build()
 
-    private val _conversationHistory = mutableListOf<ChatMessage>()
-    override val conversationHistory: List<ChatMessage> get() = _conversationHistory
+    private val _conversationHistory = MutableStateFlow<List<ChatMessage>>(emptyList())
+    override val conversationHistory: Flow<List<ChatMessage>> = _conversationHistory.asStateFlow()
 
     override var settings: LlmSettings = settingsRepository.load()
         private set
@@ -36,9 +43,15 @@ internal class ClaudeAgent(
         settingsRepository.save(newSettings)
     }
 
-    override fun addUserMessage(text: String): ChatMessage {
+    override suspend fun loadHistory() {
+        val saved = chatHistoryStorage.getAll().map { it.toChatMessage() }
+        _conversationHistory.value = saved
+    }
+
+    override suspend fun addUserMessage(text: String): ChatMessage {
         val message = ChatMessage(text = text, isUser = true)
-        _conversationHistory.add(message)
+        _conversationHistory.update { it + message }
+        chatHistoryStorage.insert(message.toRecord())
         return message
     }
 
@@ -51,24 +64,27 @@ internal class ClaudeAgent(
                 isUser = false,
                 metadataText = metadataText
             )
-            _conversationHistory.add(response)
+            _conversationHistory.update { it + response }
+            chatHistoryStorage.insert(response.toRecord())
             response
         } catch (e: Exception) {
             val errorMessage = ChatMessage(text = "Error: ${e.message}", isUser = false)
-            _conversationHistory.add(errorMessage)
+            _conversationHistory.update { it + errorMessage }
+            chatHistoryStorage.insert(errorMessage.toRecord())
             errorMessage
         }
     }
 
-    override fun clearHistory() {
-        _conversationHistory.clear()
+    override suspend fun clearHistory() {
+        _conversationHistory.value = emptyList()
+        chatHistoryStorage.deleteAll()
     }
 
     private suspend fun callApi(): Pair<String, ResponseMetadata> {
         return withContext(Dispatchers.IO) {
             val model = settings.model
             val messagesArray = JSONArray().apply {
-                for (msg in _conversationHistory) {
+                for (msg in _conversationHistory.value) {
                     put(JSONObject().apply {
                         put("role", if (msg.isUser) "user" else "assistant")
                         put("content", msg.text)
@@ -139,3 +155,15 @@ internal class ClaudeAgent(
         return "${metadata.modelId} | in: ${metadata.inputTokens} out: ${metadata.outputTokens} | ${time}s | \$$cost"
     }
 }
+
+private fun ChatMessageRecord.toChatMessage() = ChatMessage(
+    text = text,
+    isUser = isUser,
+    metadataText = metadataText
+)
+
+private fun ChatMessage.toRecord() = ChatMessageRecord(
+    text = text,
+    isUser = isUser,
+    metadataText = metadataText
+)
