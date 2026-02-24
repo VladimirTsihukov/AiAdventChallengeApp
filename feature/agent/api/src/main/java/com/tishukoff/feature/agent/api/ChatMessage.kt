@@ -1,4 +1,4 @@
-package com.tishukoff.aiadventchallengeapp.presentation.ui.models
+package com.tishukoff.feature.agent.api
 
 data class ChatMessage(
     val text: String,

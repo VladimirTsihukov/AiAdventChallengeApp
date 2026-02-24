@@ -1,6 +1,6 @@
 package com.tishukoff.aiadventchallengeapp.presentation.ui.models
 
-import com.tishukoff.aiadventchallengeapp.data.LlmSettings
+import com.tishukoff.feature.agent.api.LlmSettings
 
 sealed interface ChatIntent {
     data class UpdateInput(val text: String) : ChatIntent

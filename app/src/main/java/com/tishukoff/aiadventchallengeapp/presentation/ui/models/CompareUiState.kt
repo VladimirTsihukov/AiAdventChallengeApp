@@ -1,6 +1,6 @@
 package com.tishukoff.aiadventchallengeapp.presentation.ui.models
 
-import com.tishukoff.aiadventchallengeapp.data.ClaudeModel
+import com.tishukoff.feature.agent.api.ClaudeModel
 
 data class CompareUiState(
     val prompt: String = "",

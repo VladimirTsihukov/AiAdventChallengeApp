@@ -30,7 +30,7 @@ import com.tishukoff.aiadventchallengeapp.presentation.ui.components.ChatScreen
 import com.tishukoff.aiadventchallengeapp.presentation.ui.components.SettingsDrawer
 import com.tishukoff.aiadventchallengeapp.presentation.ui.models.ChatIntent
 import com.tishukoff.aiadventchallengeapp.presentation.ui.models.Screen
-import com.tishukoff.aiadventchallengeapp.presentation.ui.theme.AiAdventChallengeAppTheme
+import com.tishukoff.core.designsystem.AiAdventChallengeAppTheme
 import kotlinx.coroutines.launch
 import org.koin.androidx.compose.koinViewModel
 

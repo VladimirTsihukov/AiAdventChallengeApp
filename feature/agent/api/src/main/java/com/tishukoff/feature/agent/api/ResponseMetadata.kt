@@ -1,4 +1,4 @@
-package com.tishukoff.aiadventchallengeapp.data
+package com.tishukoff.feature.agent.api
 
 data class ResponseMetadata(
     val modelId: String,

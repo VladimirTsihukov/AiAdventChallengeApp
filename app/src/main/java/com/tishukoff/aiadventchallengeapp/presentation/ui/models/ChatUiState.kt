@@ -1,6 +1,7 @@
 package com.tishukoff.aiadventchallengeapp.presentation.ui.models
 
-import com.tishukoff.aiadventchallengeapp.data.LlmSettings
+import com.tishukoff.feature.agent.api.ChatMessage
+import com.tishukoff.feature.agent.api.LlmSettings
 
 data class ChatUiState(
     val input: String = "",
