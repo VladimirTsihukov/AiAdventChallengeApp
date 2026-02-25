@@ -35,6 +35,7 @@ android {
 
 dependencies {
     implementation(project(":core:designsystem"))
+    implementation(project(":core:database:api"))
     implementation(project(":core:database:impl"))
     implementation(project(":feature:agent:api"))
     implementation(project(":feature:agent:impl"))

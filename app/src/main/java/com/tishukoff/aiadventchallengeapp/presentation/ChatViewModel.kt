@@ -2,6 +2,7 @@ package com.tishukoff.aiadventchallengeapp.presentation
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.tishukoff.core.database.api.ChatStorage
 import com.tishukoff.feature.agent.api.Agent
 import com.tishukoff.aiadventchallengeapp.presentation.ui.models.ChatIntent
 import com.tishukoff.aiadventchallengeapp.presentation.ui.models.ChatUiState
@@ -13,7 +14,8 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 
 class ChatViewModel(
-    private val agent: Agent
+    private val agent: Agent,
+    private val chatStorage: ChatStorage,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ChatUiState())
@@ -26,9 +28,23 @@ class ChatViewModel(
             }
             .launchIn(viewModelScope)
 
-        viewModelScope.launch {
-            agent.loadHistory()
-        }
+        chatStorage.getAllChats()
+            .onEach { chats ->
+                _uiState.value = _uiState.value.copy(chats = chats)
+            }
+            .launchIn(viewModelScope)
+
+        agent.currentChatId
+            .onEach { chatId ->
+                _uiState.value = _uiState.value.copy(currentChatId = chatId)
+            }
+            .launchIn(viewModelScope)
+
+        agent.tokenStats
+            .onEach { stats ->
+                _uiState.value = _uiState.value.copy(tokenStats = stats)
+            }
+            .launchIn(viewModelScope)
     }
 
     fun handleIntent(intent: ChatIntent) {
@@ -38,6 +54,9 @@ class ChatViewModel(
             }
             is ChatIntent.SendMessage -> sendMessage()
             is ChatIntent.ClearHistory -> clearHistory()
+            is ChatIntent.NewChat -> newChat()
+            is ChatIntent.SelectChat -> selectChat(intent.chatId)
+            is ChatIntent.DeleteChat -> deleteChat(intent.chatId)
         }
     }
 
@@ -47,13 +66,33 @@ class ChatViewModel(
         }
     }
 
+    private fun newChat() {
+        agent.startNewChat()
+    }
+
+    private fun selectChat(chatId: Long) {
+        viewModelScope.launch {
+            agent.selectChat(chatId)
+        }
+    }
+
+    private fun deleteChat(chatId: Long) {
+        viewModelScope.launch {
+            val isCurrentChat = _uiState.value.currentChatId == chatId
+            chatStorage.deleteChat(chatId)
+            if (isCurrentChat) {
+                agent.startNewChat()
+            }
+        }
+    }
+
     private fun sendMessage() {
         val message = _uiState.value.input.trim()
         if (message.isBlank()) return
 
         _uiState.value = _uiState.value.copy(
             isLoading = true,
-            input = ""
+            input = "",
         )
 
         viewModelScope.launch {

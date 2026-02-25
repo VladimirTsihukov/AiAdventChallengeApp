@@ -25,13 +25,19 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.tishukoff.aiadventchallengeapp.presentation.ui.models.ChatIntent
 import com.tishukoff.aiadventchallengeapp.presentation.ui.models.ChatUiState
+import com.tishukoff.core.designsystem.AiAdventChallengeAppTheme
+import com.tishukoff.feature.agent.api.ChatMessage
+import com.tishukoff.feature.agent.api.TokenStats
 
 @Composable
 fun ChatScreen(
@@ -102,6 +108,12 @@ fun ChatScreen(
             }
         }
 
+        // Token stats panel
+        TokenStatsPanel(
+            stats = stateValue.tokenStats,
+            modifier = Modifier.padding(bottom = 4.dp),
+        )
+
         // Input field at the bottom
         OutlinedTextField(
             value = stateValue.input,
@@ -127,5 +139,67 @@ fun ChatScreen(
                 }
             }
         )
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun ChatScreenEmptyPreview() {
+    AiAdventChallengeAppTheme(dynamicColor = false) {
+        val state = remember {
+            mutableStateOf(ChatUiState())
+        }
+        ChatScreen(state = state, onIntent = {})
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun ChatScreenWithMessagesPreview() {
+    AiAdventChallengeAppTheme(dynamicColor = false) {
+        val state = remember {
+            mutableStateOf(
+                ChatUiState(
+                    messages = listOf(
+                        ChatMessage(text = "Привет! Как работает Kotlin?", isUser = true),
+                        ChatMessage(
+                            text = "Kotlin — это современный язык программирования, разработанный JetBrains.",
+                            isUser = false,
+                            metadataText = "claude-sonnet-4-5 | in: 12 out: 24 | 1.2s | \$0.0004",
+                        ),
+                    ),
+                    input = "Расскажи подробнее",
+                    tokenStats = TokenStats(
+                        totalInputTokens = 1250,
+                        totalOutputTokens = 3400,
+                        totalCostUsd = 0.0548,
+                        requestCount = 5,
+                        contextWindow = 200_000,
+                        lastRequestInputTokens = 800,
+                        lastRequestOutputTokens = 920,
+                        lastRequestCostUsd = 0.0162,
+                    )
+                )
+            )
+        }
+        ChatScreen(state = state, onIntent = {})
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun ChatScreenLoadingPreview() {
+    AiAdventChallengeAppTheme(dynamicColor = false) {
+        val state = remember {
+            mutableStateOf(
+                ChatUiState(
+                    messages = listOf(
+                        ChatMessage(text = "Что такое корутины?", isUser = true),
+                    ),
+                    isLoading = true,
+                )
+            )
+        }
+        ChatScreen(state = state, onIntent = {})
     }
 }
