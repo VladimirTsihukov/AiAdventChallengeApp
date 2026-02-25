@@ -6,5 +6,11 @@ import org.koin.dsl.module
 
 val agentModule = module {
     single { SettingsRepository(get()) }
-    single<Agent> { ClaudeAgent(apiKey = get(named("anthropicApiKey")), settingsRepository = get()) }
+    single<Agent> {
+        ClaudeAgent(
+            apiKey = get(named("anthropicApiKey")),
+            settingsRepository = get(),
+            chatHistoryStorage = get()
+        )
+    }
 }
