@@ -5,3 +5,7 @@ plugins {
 android {
     namespace = "com.tishukoff.core.database.api"
 }
+
+dependencies {
+    api(libs.kotlinx.coroutines.core)
+}

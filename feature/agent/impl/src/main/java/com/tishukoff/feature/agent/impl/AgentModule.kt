@@ -10,7 +10,8 @@ val agentModule = module {
         ClaudeAgent(
             apiKey = get(named("anthropicApiKey")),
             settingsRepository = get(),
-            chatHistoryStorage = get()
+            chatHistoryStorage = get(),
+            chatStorage = get(),
         )
     }
 }

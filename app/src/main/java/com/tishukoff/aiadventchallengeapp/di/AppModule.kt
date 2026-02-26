@@ -16,5 +16,5 @@ val appModule = module {
         get<Context>().getSharedPreferences("llm_settings", Context.MODE_PRIVATE)
     }
     single(named("anthropicApiKey")) { BuildConfig.ANTHROPIC_API_KEY }
-    viewModel { ChatViewModel(get()) }
+    viewModel { ChatViewModel(get(), get()) }
 }

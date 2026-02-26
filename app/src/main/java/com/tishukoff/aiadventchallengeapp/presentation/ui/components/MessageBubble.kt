@@ -14,7 +14,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import com.tishukoff.core.designsystem.AiAdventChallengeAppTheme
 import com.tishukoff.feature.agent.api.ChatMessage
 
 internal val BubbleShape = RoundedCornerShape(16.dp)
@@ -59,5 +61,29 @@ fun MessageBubble(message: ChatMessage) {
                 )
             }
         }
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun MessageBubbleUserPreview() {
+    AiAdventChallengeAppTheme(dynamicColor = false) {
+        MessageBubble(
+            message = ChatMessage(text = "Привет! Как дела?", isUser = true),
+        )
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun MessageBubbleAssistantPreview() {
+    AiAdventChallengeAppTheme(dynamicColor = false) {
+        MessageBubble(
+            message = ChatMessage(
+                text = "Привет! У меня всё отлично, спасибо за вопрос. Чем могу помочь?",
+                isUser = false,
+                metadataText = "claude-sonnet-4-5 | in: 8 out: 20 | 0.9s | \$0.0003",
+            ),
+        )
     }
 }

@@ -33,6 +33,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.tishukoff.feature.agent.api.ClaudeModel
 import com.tishukoff.feature.agent.api.LlmSettings
@@ -195,5 +196,16 @@ private fun SettingContent(
         ) {
             Text("Save")
         }
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun SettingContentPreview() {
+    MaterialTheme {
+        SettingContent(
+            settings = LlmSettings(),
+            onSave = {},
+        )
     }
 }
