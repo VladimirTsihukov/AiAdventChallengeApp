@@ -111,6 +111,7 @@ fun ChatScreen(
         // Token stats panel
         TokenStatsPanel(
             stats = stateValue.tokenStats,
+            compressionStats = stateValue.compressionStats,
             modifier = Modifier.padding(bottom = 4.dp),
         )
 

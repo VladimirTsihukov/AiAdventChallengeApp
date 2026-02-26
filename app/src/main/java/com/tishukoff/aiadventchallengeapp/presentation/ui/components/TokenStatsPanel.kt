@@ -28,12 +28,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.tishukoff.core.designsystem.AiAdventChallengeAppTheme
+import com.tishukoff.feature.agent.api.CompressionStats
 import com.tishukoff.feature.agent.api.TokenStats
 import java.util.Locale
 
 @Composable
 fun TokenStatsPanel(
     stats: TokenStats,
+    compressionStats: CompressionStats = CompressionStats(),
     modifier: Modifier = Modifier,
 ) {
     if (stats.requestCount == 0) return
@@ -115,6 +117,18 @@ fun TokenStatsPanel(
                 StatsRow("Last output", formatNumber(stats.lastRequestOutputTokens))
                 StatsRow("Last cost", "$${formatCost(stats.lastRequestCostUsd)}")
                 StatsRow("Context window", formatNumber(stats.contextWindow))
+                StatsRow(
+                    "Compression",
+                    if (compressionStats.isEnabled) "ON" else "OFF",
+                )
+                if (compressionStats.isEnabled) {
+                    StatsRow("Summaries", compressionStats.summaryCount.toString())
+                    StatsRow("Tokens saved", formatNumber(compressionStats.tokensSaved))
+                    StatsRow(
+                        "Compression ratio",
+                        "${formatPercent(compressionStats.compressionRatio * 100)}%",
+                    )
+                }
             }
         }
     }
