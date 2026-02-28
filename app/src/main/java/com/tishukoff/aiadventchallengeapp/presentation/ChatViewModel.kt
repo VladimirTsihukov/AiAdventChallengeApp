@@ -45,6 +45,12 @@ class ChatViewModel(
                 _uiState.value = _uiState.value.copy(tokenStats = stats)
             }
             .launchIn(viewModelScope)
+
+        agent.compressionStats
+            .onEach { stats ->
+                _uiState.value = _uiState.value.copy(compressionStats = stats)
+            }
+            .launchIn(viewModelScope)
     }
 
     fun handleIntent(intent: ChatIntent) {

@@ -1,6 +1,7 @@
 package com.tishukoff.feature.setting.impl.presentation.ui
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -16,6 +17,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -23,19 +25,23 @@ import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.tishukoff.feature.agent.api.ClaudeModel
+import com.tishukoff.feature.agent.api.CompressionSettings
 import com.tishukoff.feature.agent.api.LlmSettings
 import com.tishukoff.feature.setting.impl.presentation.SettingViewModel
 import org.koin.androidx.compose.koinViewModel
@@ -90,6 +96,14 @@ private fun SettingContent(
     }
     var systemPrompt by remember(settings) { mutableStateOf(settings.systemPrompt) }
     var modelDropdownExpanded by remember { mutableStateOf(false) }
+
+    var compressionEnabled by remember(settings) { mutableStateOf(settings.compression.enabled) }
+    var recentMessagesToKeep by remember(settings) {
+        mutableIntStateOf(settings.compression.recentMessagesToKeep)
+    }
+    var summarizationBatchSize by remember(settings) {
+        mutableIntStateOf(settings.compression.summarizationBatchSize)
+    }
 
     Column(
         modifier = modifier
@@ -176,6 +190,57 @@ private fun SettingContent(
 
         Spacer(modifier = Modifier.height(24.dp))
 
+        HorizontalDivider()
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text(
+            text = "Context Compression",
+            style = MaterialTheme.typography.titleMedium,
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "Enable compression",
+                modifier = Modifier.weight(1f),
+            )
+            Switch(
+                checked = compressionEnabled,
+                onCheckedChange = { compressionEnabled = it },
+            )
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Text(text = "Recent messages to keep: $recentMessagesToKeep")
+        Slider(
+            value = recentMessagesToKeep.toFloat(),
+            onValueChange = { recentMessagesToKeep = it.roundToInt() },
+            valueRange = 2f..20f,
+            steps = 17,
+            enabled = compressionEnabled,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(text = "Batch size for summarization: $summarizationBatchSize")
+        Slider(
+            value = summarizationBatchSize.toFloat(),
+            onValueChange = { summarizationBatchSize = it.roundToInt() },
+            valueRange = 5f..20f,
+            steps = 14,
+            enabled = compressionEnabled,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
         Button(
             onClick = {
                 val tokens = maxTokens.toIntOrNull() ?: 1024
@@ -189,6 +254,11 @@ private fun SettingContent(
                         temperature = temperature,
                         stopSequences = stops,
                         systemPrompt = systemPrompt,
+                        compression = CompressionSettings(
+                            enabled = compressionEnabled,
+                            recentMessagesToKeep = recentMessagesToKeep,
+                            summarizationBatchSize = summarizationBatchSize,
+                        ),
                     )
                 )
             },

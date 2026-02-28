@@ -10,6 +10,9 @@ interface Agent {
     /** Accumulated token statistics for the current dialog. */
     val tokenStats: Flow<TokenStats>
 
+    /** Live compression statistics for the current dialog. */
+    val compressionStats: Flow<CompressionStats>
+
     fun updateSettings(newSettings: LlmSettings)
     suspend fun addUserMessage(text: String): ChatMessage
     suspend fun processRequest(): ChatMessage

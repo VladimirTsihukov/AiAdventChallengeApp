@@ -12,6 +12,7 @@ val agentModule = module {
             settingsRepository = get(),
             chatHistoryStorage = get(),
             chatStorage = get(),
+            contextSummaryStorage = get(),
         )
     }
 }

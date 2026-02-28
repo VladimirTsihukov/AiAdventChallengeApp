@@ -3,8 +3,10 @@ package com.tishukoff.feature.agent.impl
 import com.tishukoff.core.database.api.ChatHistoryStorage
 import com.tishukoff.core.database.api.ChatMessageRecord
 import com.tishukoff.core.database.api.ChatStorage
+import com.tishukoff.core.database.api.ContextSummaryStorage
 import com.tishukoff.feature.agent.api.Agent
 import com.tishukoff.feature.agent.api.ChatMessage
+import com.tishukoff.feature.agent.api.CompressionStats
 import com.tishukoff.feature.agent.api.LlmSettings
 import com.tishukoff.feature.agent.api.ResponseMetadata
 import com.tishukoff.feature.agent.api.TokenStats
@@ -30,6 +32,7 @@ internal class ClaudeAgent(
     private val settingsRepository: SettingsRepository,
     private val chatHistoryStorage: ChatHistoryStorage,
     private val chatStorage: ChatStorage,
+    private val contextSummaryStorage: ContextSummaryStorage,
 ) : Agent {
 
     private val client = OkHttpClient.Builder()
@@ -37,11 +40,20 @@ internal class ClaudeAgent(
         .readTimeout(60, TimeUnit.SECONDS)
         .build()
 
+    private val contextCompressor = ContextCompressor(
+        apiKey = apiKey,
+        client = client,
+        contextSummaryStorage = contextSummaryStorage,
+    )
+
     private val _currentChatId = MutableStateFlow<Long?>(null)
     override val currentChatId: Flow<Long?> = _currentChatId.asStateFlow()
 
     private val _tokenStats = MutableStateFlow(TokenStats())
     override val tokenStats: Flow<TokenStats> = _tokenStats.asStateFlow()
+
+    private val _compressionStats = MutableStateFlow(CompressionStats())
+    override val compressionStats: Flow<CompressionStats> = _compressionStats.asStateFlow()
 
     @Suppress("OPT_IN_USAGE")
     override val conversationHistory: Flow<List<ChatMessage>> =
@@ -119,8 +131,37 @@ internal class ClaudeAgent(
         return withContext(Dispatchers.IO) {
             val model = settings.model
             val currentMessages = chatHistoryStorage.getByChatIdOnce(chatId)
+            val compression = settings.compression
+
+            val systemPromptText: String
+            val messagesToSend: List<ChatMessageRecord>
+
+            if (compression.enabled) {
+                val compressed = contextCompressor.buildCompressedContext(
+                    chatId = chatId,
+                    allMessages = currentMessages,
+                    settings = compression,
+                )
+                _compressionStats.value = compressed.stats
+                messagesToSend = compressed.recentMessages
+
+                systemPromptText = buildString {
+                    if (compressed.summaryPrefix.isNotBlank()) {
+                        append(compressed.summaryPrefix)
+                    }
+                    if (settings.systemPrompt.isNotBlank()) {
+                        if (isNotEmpty()) append("\n\n")
+                        append(settings.systemPrompt)
+                    }
+                }
+            } else {
+                _compressionStats.value = CompressionStats()
+                messagesToSend = currentMessages
+                systemPromptText = settings.systemPrompt
+            }
+
             val messagesArray = JSONArray().apply {
-                for (msg in currentMessages) {
+                for (msg in messagesToSend) {
                     put(JSONObject().apply {
                         put("role", if (msg.isUser) "user" else "assistant")
                         put("content", msg.text)
@@ -132,8 +173,8 @@ internal class ClaudeAgent(
                 put("model", model.apiId)
                 put("max_tokens", settings.maxTokens)
                 put("temperature", settings.temperature.toDouble())
-                if (settings.systemPrompt.isNotBlank()) {
-                    put("system", settings.systemPrompt)
+                if (systemPromptText.isNotBlank()) {
+                    put("system", systemPromptText)
                 }
                 put("messages", messagesArray)
                 if (settings.stopSequences.isNotEmpty()) {
