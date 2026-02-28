@@ -5,11 +5,18 @@ import com.tishukoff.core.database.api.ChatMessageRecord
 import com.tishukoff.core.database.api.ChatStorage
 import com.tishukoff.core.database.api.ContextSummaryStorage
 import com.tishukoff.feature.agent.api.Agent
+import com.tishukoff.feature.agent.api.BranchInfo
 import com.tishukoff.feature.agent.api.ChatMessage
 import com.tishukoff.feature.agent.api.CompressionStats
+import com.tishukoff.feature.agent.api.ContextStrategyType
 import com.tishukoff.feature.agent.api.LlmSettings
 import com.tishukoff.feature.agent.api.ResponseMetadata
 import com.tishukoff.feature.agent.api.TokenStats
+import com.tishukoff.feature.agent.impl.strategy.BranchingStrategy
+import com.tishukoff.feature.agent.impl.strategy.ContextStrategy
+import com.tishukoff.feature.agent.impl.strategy.SlidingWindowStrategy
+import com.tishukoff.feature.agent.impl.strategy.StickyFactsStrategy
+import com.tishukoff.feature.agent.impl.strategy.SummarizationStrategy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -46,6 +53,15 @@ internal class ClaudeAgent(
         contextSummaryStorage = contextSummaryStorage,
     )
 
+    private val branchingStrategy = BranchingStrategy()
+
+    private val strategies: Map<ContextStrategyType, ContextStrategy> = mapOf(
+        ContextStrategyType.SUMMARIZATION to SummarizationStrategy(contextCompressor),
+        ContextStrategyType.SLIDING_WINDOW to SlidingWindowStrategy(),
+        ContextStrategyType.STICKY_FACTS to StickyFactsStrategy(apiKey, client),
+        ContextStrategyType.BRANCHING to branchingStrategy,
+    )
+
     private val _currentChatId = MutableStateFlow<Long?>(null)
     override val currentChatId: Flow<Long?> = _currentChatId.asStateFlow()
 
@@ -54,6 +70,9 @@ internal class ClaudeAgent(
 
     private val _compressionStats = MutableStateFlow(CompressionStats())
     override val compressionStats: Flow<CompressionStats> = _compressionStats.asStateFlow()
+
+    override val branches: Flow<List<BranchInfo>> = branchingStrategy.branches
+    override val currentBranchId: Flow<String?> = branchingStrategy.currentBranchId
 
     @Suppress("OPT_IN_USAGE")
     override val conversationHistory: Flow<List<ChatMessage>> =
@@ -67,11 +86,13 @@ internal class ClaudeAgent(
             }
         }
 
-    override var settings: LlmSettings = settingsRepository.load()
-        private set
+    private val _settings = MutableStateFlow(settingsRepository.load())
+    override val settings: Flow<LlmSettings> = _settings.asStateFlow()
+
+    private val currentSettings: LlmSettings get() = _settings.value
 
     override fun updateSettings(newSettings: LlmSettings) {
-        settings = newSettings
+        _settings.value = newSettings
         settingsRepository.save(newSettings)
     }
 
@@ -111,12 +132,27 @@ internal class ClaudeAgent(
 
     override suspend fun selectChat(chatId: Long) {
         _currentChatId.value = chatId
-        _tokenStats.value = TokenStats(contextWindow = settings.model.contextWindow)
+        _tokenStats.value = TokenStats(contextWindow = currentSettings.model.contextWindow)
     }
 
     override fun startNewChat() {
         _currentChatId.value = null
         _tokenStats.value = TokenStats()
+    }
+
+    override fun createCheckpoint(name: String) {
+        val chatId = _currentChatId.value ?: return
+        val messageCount = _tokenStats.value.requestCount * 2
+        branchingStrategy.createCheckpoint(chatId, name, messageCount)
+    }
+
+    override fun createBranch(checkpointId: String, name: String) {
+        val chatId = _currentChatId.value ?: return
+        branchingStrategy.createBranch(chatId, checkpointId, name)
+    }
+
+    override fun switchBranch(branchId: String) {
+        branchingStrategy.switchBranch(branchId)
     }
 
     private suspend fun getOrCreateChatId(firstMessageText: String): Long {
@@ -129,25 +165,27 @@ internal class ClaudeAgent(
 
     private suspend fun callApi(chatId: Long): Pair<String, ResponseMetadata> {
         return withContext(Dispatchers.IO) {
+            val settings = currentSettings
             val model = settings.model
             val currentMessages = chatHistoryStorage.getByChatIdOnce(chatId)
-            val compression = settings.compression
+
+            val strategy = strategies[settings.contextStrategy]
+            val strategyContext = strategy?.buildContext(
+                chatId = chatId,
+                allMessages = currentMessages,
+                settings = settings,
+            )
 
             val systemPromptText: String
             val messagesToSend: List<ChatMessageRecord>
 
-            if (compression.enabled) {
-                val compressed = contextCompressor.buildCompressedContext(
-                    chatId = chatId,
-                    allMessages = currentMessages,
-                    settings = compression,
-                )
-                _compressionStats.value = compressed.stats
-                messagesToSend = compressed.recentMessages
+            if (strategyContext != null) {
+                _compressionStats.value = strategyContext.stats
+                messagesToSend = strategyContext.messagesToSend
 
                 systemPromptText = buildString {
-                    if (compressed.summaryPrefix.isNotBlank()) {
-                        append(compressed.summaryPrefix)
+                    if (strategyContext.systemPromptPrefix.isNotBlank()) {
+                        append(strategyContext.systemPromptPrefix)
                     }
                     if (settings.systemPrompt.isNotBlank()) {
                         if (isNotEmpty()) append("\n\n")
@@ -232,7 +270,7 @@ internal class ClaudeAgent(
             totalOutputTokens = current.totalOutputTokens + metadata.outputTokens,
             totalCostUsd = current.totalCostUsd + metadata.costUsd,
             requestCount = current.requestCount + 1,
-            contextWindow = settings.model.contextWindow,
+            contextWindow = currentSettings.model.contextWindow,
             lastRequestInputTokens = metadata.inputTokens,
             lastRequestOutputTokens = metadata.outputTokens,
             lastRequestCostUsd = metadata.costUsd,
