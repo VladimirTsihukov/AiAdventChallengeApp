@@ -5,6 +5,7 @@ import com.tishukoff.core.database.api.ChatMessageRecord
 import com.tishukoff.core.database.api.ChatStorage
 import com.tishukoff.core.database.api.ContextSummaryStorage
 import com.tishukoff.feature.agent.api.Agent
+import com.tishukoff.feature.memory.api.MemoryManager
 import com.tishukoff.feature.agent.api.BranchInfo
 import com.tishukoff.feature.agent.api.ChatMessage
 import com.tishukoff.feature.agent.api.CompressionStats
@@ -40,6 +41,7 @@ internal class ClaudeAgent(
     private val chatHistoryStorage: ChatHistoryStorage,
     private val chatStorage: ChatStorage,
     private val contextSummaryStorage: ContextSummaryStorage,
+    private val memoryManager: MemoryManager,
 ) : Agent {
 
     private val client = OkHttpClient.Builder()
@@ -115,6 +117,13 @@ internal class ClaudeAgent(
                 metadataText = metadataText,
             )
             chatHistoryStorage.insert(chatId, response.toRecord())
+
+            val lastUserMsg = chatHistoryStorage.getByChatIdOnce(chatId)
+                .lastOrNull { it.isUser }?.text.orEmpty()
+            try {
+                memoryManager.processNewMessage(chatId, lastUserMsg, text)
+            } catch (_: Exception) { }
+
             response
         } catch (e: Exception) {
             val errorMessage = ChatMessage(text = "Error: ${e.message}", isUser = false)
@@ -179,12 +188,18 @@ internal class ClaudeAgent(
             val systemPromptText: String
             val messagesToSend: List<ChatMessageRecord>
 
+            val memoryPrefix = memoryManager.buildMemoryPromptPrefix(chatId)
+
             if (strategyContext != null) {
                 _compressionStats.value = strategyContext.stats
                 messagesToSend = strategyContext.messagesToSend
 
                 systemPromptText = buildString {
+                    if (memoryPrefix.isNotBlank()) {
+                        append(memoryPrefix)
+                    }
                     if (strategyContext.systemPromptPrefix.isNotBlank()) {
+                        if (isNotEmpty()) append("\n\n")
                         append(strategyContext.systemPromptPrefix)
                     }
                     if (settings.systemPrompt.isNotBlank()) {
@@ -195,7 +210,15 @@ internal class ClaudeAgent(
             } else {
                 _compressionStats.value = CompressionStats()
                 messagesToSend = currentMessages
-                systemPromptText = settings.systemPrompt
+                systemPromptText = buildString {
+                    if (memoryPrefix.isNotBlank()) {
+                        append(memoryPrefix)
+                    }
+                    if (settings.systemPrompt.isNotBlank()) {
+                        if (isNotEmpty()) append("\n\n")
+                        append(settings.systemPrompt)
+                    }
+                }
             }
 
             val messagesArray = JSONArray().apply {

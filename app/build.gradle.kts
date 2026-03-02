@@ -41,6 +41,8 @@ dependencies {
     implementation(project(":feature:agent:impl"))
     implementation(project(":feature:setting:api"))
     implementation(project(":feature:setting:impl"))
+    implementation(project(":feature:memory:api"))
+    implementation(project(":feature:memory:impl"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
