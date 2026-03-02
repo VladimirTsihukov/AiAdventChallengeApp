@@ -7,4 +7,5 @@ data class LlmSettings(
     val stopSequences: List<String> = emptyList(),
     val systemPrompt: String = "",
     val compression: CompressionSettings = CompressionSettings(),
+    val contextStrategy: ContextStrategyType = ContextStrategyType.SUMMARIZATION,
 )

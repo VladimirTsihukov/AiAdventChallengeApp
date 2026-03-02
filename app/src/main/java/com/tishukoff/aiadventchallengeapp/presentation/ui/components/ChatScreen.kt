@@ -37,6 +37,7 @@ import com.tishukoff.aiadventchallengeapp.presentation.ui.models.ChatIntent
 import com.tishukoff.aiadventchallengeapp.presentation.ui.models.ChatUiState
 import com.tishukoff.core.designsystem.AiAdventChallengeAppTheme
 import com.tishukoff.feature.agent.api.ChatMessage
+import com.tishukoff.feature.agent.api.ContextStrategyType
 import com.tishukoff.feature.agent.api.TokenStats
 
 @Composable
@@ -108,10 +109,26 @@ fun ChatScreen(
             }
         }
 
-        // Token stats panel
+        if (stateValue.contextStrategyType == ContextStrategyType.BRANCHING) {
+            BranchPanel(
+                branches = stateValue.branches,
+                currentBranchId = stateValue.currentBranchId,
+                onCreateCheckpoint = { name ->
+                    onIntent(ChatIntent.CreateCheckpoint(name))
+                },
+                onCreateBranch = { checkpointId, name ->
+                    onIntent(ChatIntent.CreateBranch(checkpointId, name))
+                },
+                onSwitchBranch = { branchId ->
+                    onIntent(ChatIntent.SwitchBranch(branchId))
+                },
+            )
+        }
+
         TokenStatsPanel(
             stats = stateValue.tokenStats,
             compressionStats = stateValue.compressionStats,
+            contextStrategyType = stateValue.contextStrategyType,
             modifier = Modifier.padding(bottom = 4.dp),
         )
 

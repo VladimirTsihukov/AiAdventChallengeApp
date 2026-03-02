@@ -51,6 +51,26 @@ class ChatViewModel(
                 _uiState.value = _uiState.value.copy(compressionStats = stats)
             }
             .launchIn(viewModelScope)
+
+        agent.settings
+            .onEach { settings ->
+                _uiState.value = _uiState.value.copy(
+                    contextStrategyType = settings.contextStrategy,
+                )
+            }
+            .launchIn(viewModelScope)
+
+        agent.branches
+            .onEach { branches ->
+                _uiState.value = _uiState.value.copy(branches = branches)
+            }
+            .launchIn(viewModelScope)
+
+        agent.currentBranchId
+            .onEach { branchId ->
+                _uiState.value = _uiState.value.copy(currentBranchId = branchId)
+            }
+            .launchIn(viewModelScope)
     }
 
     fun handleIntent(intent: ChatIntent) {
@@ -63,6 +83,9 @@ class ChatViewModel(
             is ChatIntent.NewChat -> newChat()
             is ChatIntent.SelectChat -> selectChat(intent.chatId)
             is ChatIntent.DeleteChat -> deleteChat(intent.chatId)
+            is ChatIntent.CreateCheckpoint -> agent.createCheckpoint(intent.name)
+            is ChatIntent.CreateBranch -> agent.createBranch(intent.checkpointId, intent.name)
+            is ChatIntent.SwitchBranch -> agent.switchBranch(intent.branchId)
         }
     }
 

@@ -4,6 +4,7 @@ import android.content.SharedPreferences
 import androidx.core.content.edit
 import com.tishukoff.feature.agent.api.ClaudeModel
 import com.tishukoff.feature.agent.api.CompressionSettings
+import com.tishukoff.feature.agent.api.ContextStrategyType
 import com.tishukoff.feature.agent.api.LlmSettings
 
 internal class SettingsRepository(private val prefs: SharedPreferences) {
@@ -11,6 +12,10 @@ internal class SettingsRepository(private val prefs: SharedPreferences) {
     fun load(): LlmSettings {
         val modelName = prefs.getString(KEY_MODEL, ClaudeModel.SONNET.name) ?: ClaudeModel.SONNET.name
         val model = ClaudeModel.entries.find { it.name == modelName } ?: ClaudeModel.SONNET
+        val strategyName = prefs.getString(KEY_CONTEXT_STRATEGY, ContextStrategyType.SUMMARIZATION.name)
+            ?: ContextStrategyType.SUMMARIZATION.name
+        val contextStrategy = ContextStrategyType.entries.find { it.name == strategyName }
+            ?: ContextStrategyType.SUMMARIZATION
         return LlmSettings(
             model = model,
             maxTokens = prefs.getInt(KEY_MAX_TOKENS, 1024),
@@ -26,6 +31,7 @@ internal class SettingsRepository(private val prefs: SharedPreferences) {
                 recentMessagesToKeep = prefs.getInt(KEY_COMPRESSION_RECENT, 10),
                 summarizationBatchSize = prefs.getInt(KEY_COMPRESSION_BATCH_SIZE, 10),
             ),
+            contextStrategy = contextStrategy,
         )
     }
 
@@ -39,6 +45,7 @@ internal class SettingsRepository(private val prefs: SharedPreferences) {
                 .putBoolean(KEY_COMPRESSION_ENABLED, settings.compression.enabled)
                 .putInt(KEY_COMPRESSION_RECENT, settings.compression.recentMessagesToKeep)
                 .putInt(KEY_COMPRESSION_BATCH_SIZE, settings.compression.summarizationBatchSize)
+                .putString(KEY_CONTEXT_STRATEGY, settings.contextStrategy.name)
         }
     }
 
@@ -51,5 +58,6 @@ internal class SettingsRepository(private val prefs: SharedPreferences) {
         const val KEY_COMPRESSION_ENABLED = "compression.enabled"
         const val KEY_COMPRESSION_RECENT = "compression.recentMessagesToKeep"
         const val KEY_COMPRESSION_BATCH_SIZE = "compression.summarizationBatchSize"
+        const val KEY_CONTEXT_STRATEGY = "context.strategy"
     }
 }

@@ -7,4 +7,7 @@ sealed interface ChatIntent {
     data object NewChat : ChatIntent
     data class SelectChat(val chatId: Long) : ChatIntent
     data class DeleteChat(val chatId: Long) : ChatIntent
+    data class CreateCheckpoint(val name: String) : ChatIntent
+    data class CreateBranch(val checkpointId: String, val name: String) : ChatIntent
+    data class SwitchBranch(val branchId: String) : ChatIntent
 }

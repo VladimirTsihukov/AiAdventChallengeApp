@@ -29,6 +29,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.tishukoff.core.designsystem.AiAdventChallengeAppTheme
 import com.tishukoff.feature.agent.api.CompressionStats
+import com.tishukoff.feature.agent.api.ContextStrategyType
 import com.tishukoff.feature.agent.api.TokenStats
 import java.util.Locale
 
@@ -36,6 +37,7 @@ import java.util.Locale
 fun TokenStatsPanel(
     stats: TokenStats,
     compressionStats: CompressionStats = CompressionStats(),
+    contextStrategyType: ContextStrategyType = ContextStrategyType.SUMMARIZATION,
     modifier: Modifier = Modifier,
 ) {
     if (stats.requestCount == 0) return
@@ -108,6 +110,7 @@ fun TokenStatsPanel(
             exit = shrinkVertically(),
         ) {
             Column(modifier = Modifier.padding(top = 8.dp)) {
+                StatsRow("Strategy", contextStrategyType.displayName)
                 StatsRow("Requests", stats.requestCount.toString())
                 StatsRow("Total input", formatNumber(stats.totalInputTokens))
                 StatsRow("Total output", formatNumber(stats.totalOutputTokens))
@@ -117,17 +120,39 @@ fun TokenStatsPanel(
                 StatsRow("Last output", formatNumber(stats.lastRequestOutputTokens))
                 StatsRow("Last cost", "$${formatCost(stats.lastRequestCostUsd)}")
                 StatsRow("Context window", formatNumber(stats.contextWindow))
-                StatsRow(
-                    "Compression",
-                    if (compressionStats.isEnabled) "ON" else "OFF",
-                )
-                if (compressionStats.isEnabled) {
-                    StatsRow("Summaries", compressionStats.summaryCount.toString())
-                    StatsRow("Tokens saved", formatNumber(compressionStats.tokensSaved))
-                    StatsRow(
-                        "Compression ratio",
-                        "${formatPercent(compressionStats.compressionRatio * 100)}%",
-                    )
+
+                when (contextStrategyType) {
+                    ContextStrategyType.SUMMARIZATION -> {
+                        StatsRow(
+                            "Compression",
+                            if (compressionStats.isEnabled) "ON" else "OFF",
+                        )
+                        if (compressionStats.isEnabled) {
+                            StatsRow("Summaries", compressionStats.summaryCount.toString())
+                            StatsRow("Tokens saved", formatNumber(compressionStats.tokensSaved))
+                            StatsRow(
+                                "Compression ratio",
+                                "${formatPercent(compressionStats.compressionRatio * 100)}%",
+                            )
+                        }
+                    }
+                    ContextStrategyType.SLIDING_WINDOW -> {
+                        if (compressionStats.isEnabled) {
+                            StatsRow("Messages dropped", compressionStats.summaryCount.toString())
+                            StatsRow("Tokens saved", formatNumber(compressionStats.tokensSaved))
+                        }
+                    }
+                    ContextStrategyType.STICKY_FACTS -> {
+                        if (compressionStats.isEnabled) {
+                            StatsRow("Facts stored", compressionStats.summaryCount.toString())
+                            StatsRow("Tokens saved", formatNumber(compressionStats.tokensSaved))
+                        }
+                    }
+                    ContextStrategyType.BRANCHING -> {
+                        if (compressionStats.isEnabled) {
+                            StatsRow("Branches", compressionStats.summaryCount.toString())
+                        }
+                    }
                 }
             }
         }

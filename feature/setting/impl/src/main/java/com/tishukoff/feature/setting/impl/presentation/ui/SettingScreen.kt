@@ -42,6 +42,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.tishukoff.feature.agent.api.ClaudeModel
 import com.tishukoff.feature.agent.api.CompressionSettings
+import com.tishukoff.feature.agent.api.ContextStrategyType
 import com.tishukoff.feature.agent.api.LlmSettings
 import com.tishukoff.feature.setting.impl.presentation.SettingViewModel
 import org.koin.androidx.compose.koinViewModel
@@ -97,6 +98,8 @@ private fun SettingContent(
     var systemPrompt by remember(settings) { mutableStateOf(settings.systemPrompt) }
     var modelDropdownExpanded by remember { mutableStateOf(false) }
 
+    var selectedStrategy by remember(settings) { mutableStateOf(settings.contextStrategy) }
+    var strategyDropdownExpanded by remember { mutableStateOf(false) }
     var compressionEnabled by remember(settings) { mutableStateOf(settings.compression.enabled) }
     var recentMessagesToKeep by remember(settings) {
         mutableIntStateOf(settings.compression.recentMessagesToKeep)
@@ -195,49 +198,94 @@ private fun SettingContent(
         Spacer(modifier = Modifier.height(16.dp))
 
         Text(
-            text = "Context Compression",
+            text = "Context Strategy",
             style = MaterialTheme.typography.titleMedium,
         )
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
+        ExposedDropdownMenuBox(
+            expanded = strategyDropdownExpanded,
+            onExpandedChange = { strategyDropdownExpanded = it },
         ) {
-            Text(
-                text = "Enable compression",
-                modifier = Modifier.weight(1f),
+            OutlinedTextField(
+                value = selectedStrategy.displayName,
+                onValueChange = {},
+                readOnly = true,
+                label = { Text("Strategy") },
+                trailingIcon = {
+                    ExposedDropdownMenuDefaults.TrailingIcon(expanded = strategyDropdownExpanded)
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .menuAnchor(MenuAnchorType.PrimaryNotEditable),
             )
-            Switch(
-                checked = compressionEnabled,
-                onCheckedChange = { compressionEnabled = it },
-            )
+            ExposedDropdownMenu(
+                expanded = strategyDropdownExpanded,
+                onDismissRequest = { strategyDropdownExpanded = false },
+            ) {
+                ContextStrategyType.entries.forEach { strategy ->
+                    DropdownMenuItem(
+                        text = { Text(strategy.displayName) },
+                        onClick = {
+                            selectedStrategy = strategy
+                            strategyDropdownExpanded = false
+                        },
+                    )
+                }
+            }
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
-        Text(text = "Recent messages to keep: $recentMessagesToKeep")
-        Slider(
-            value = recentMessagesToKeep.toFloat(),
-            onValueChange = { recentMessagesToKeep = it.roundToInt() },
-            valueRange = 2f..20f,
-            steps = 17,
-            enabled = compressionEnabled,
-            modifier = Modifier.fillMaxWidth(),
+        if (selectedStrategy == ContextStrategyType.SUMMARIZATION) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Enable compression",
+                    modifier = Modifier.weight(1f),
+                )
+                Switch(
+                    checked = compressionEnabled,
+                    onCheckedChange = { compressionEnabled = it },
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+
+        val showRecentSlider = selectedStrategy in listOf(
+            ContextStrategyType.SUMMARIZATION,
+            ContextStrategyType.SLIDING_WINDOW,
+            ContextStrategyType.STICKY_FACTS,
         )
 
-        Spacer(modifier = Modifier.height(8.dp))
+        if (showRecentSlider) {
+            Text(text = "Recent messages to keep: $recentMessagesToKeep")
+            Slider(
+                value = recentMessagesToKeep.toFloat(),
+                onValueChange = { recentMessagesToKeep = it.roundToInt() },
+                valueRange = 2f..20f,
+                steps = 17,
+                modifier = Modifier.fillMaxWidth(),
+            )
 
-        Text(text = "Batch size for summarization: $summarizationBatchSize")
-        Slider(
-            value = summarizationBatchSize.toFloat(),
-            onValueChange = { summarizationBatchSize = it.roundToInt() },
-            valueRange = 5f..20f,
-            steps = 14,
-            enabled = compressionEnabled,
-            modifier = Modifier.fillMaxWidth(),
-        )
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+
+        if (selectedStrategy == ContextStrategyType.SUMMARIZATION) {
+            Text(text = "Batch size for summarization: $summarizationBatchSize")
+            Slider(
+                value = summarizationBatchSize.toFloat(),
+                onValueChange = { summarizationBatchSize = it.roundToInt() },
+                valueRange = 5f..20f,
+                steps = 14,
+                enabled = compressionEnabled,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
 
         Spacer(modifier = Modifier.height(24.dp))
 
@@ -259,6 +307,7 @@ private fun SettingContent(
                             recentMessagesToKeep = recentMessagesToKeep,
                             summarizationBatchSize = summarizationBatchSize,
                         ),
+                        contextStrategy = selectedStrategy,
                     )
                 )
             },
