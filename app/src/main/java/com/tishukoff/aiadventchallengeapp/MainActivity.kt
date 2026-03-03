@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -36,6 +37,8 @@ import com.tishukoff.aiadventchallengeapp.presentation.ui.components.DrawerConte
 import com.tishukoff.aiadventchallengeapp.presentation.ui.models.ChatIntent
 import com.tishukoff.aiadventchallengeapp.presentation.ui.models.ChatRoute
 import com.tishukoff.core.designsystem.AiAdventChallengeAppTheme
+import com.tishukoff.feature.memory.api.MemoryRoute
+import com.tishukoff.feature.memory.impl.presentation.ui.MemoryScreen
 import com.tishukoff.feature.setting.api.SettingRoute
 import com.tishukoff.feature.setting.impl.presentation.ui.SettingScreen
 import kotlinx.coroutines.launch
@@ -70,11 +73,22 @@ fun AppNavigation() {
                     onNavigateToSettings = dropUnlessResumed {
                         backStack.add(SettingRoute)
                     },
+                    onNavigateToMemory = dropUnlessResumed {
+                        backStack.add(MemoryRoute)
+                    },
                 )
             }
 
             entry<SettingRoute> {
                 SettingScreen(
+                    onBack = dropUnlessResumed {
+                        backStack.removeLastOrNull()
+                    },
+                )
+            }
+
+            entry<MemoryRoute> {
+                MemoryScreen(
                     onBack = dropUnlessResumed {
                         backStack.removeLastOrNull()
                     },
@@ -88,6 +102,7 @@ fun AppNavigation() {
 @Composable
 fun ChatScreenWithDrawer(
     onNavigateToSettings: () -> Unit,
+    onNavigateToMemory: () -> Unit,
     viewModel: ChatViewModel = koinViewModel(),
 ) {
     val state by viewModel.uiState.collectAsState()
@@ -134,6 +149,9 @@ fun ChatScreenWithDrawer(
                         }
                     },
                     actions = {
+                        TextButton(onClick = onNavigateToMemory) {
+                            Text("Memory")
+                        }
                         if (state.messages.isNotEmpty() && !state.isLoading) {
                             IconButton(
                                 onClick = { viewModel.handleIntent(ChatIntent.ClearHistory) }
