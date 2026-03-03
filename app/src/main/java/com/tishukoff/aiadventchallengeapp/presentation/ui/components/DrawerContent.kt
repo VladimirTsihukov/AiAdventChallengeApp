@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -36,6 +37,7 @@ fun DrawerContent(
     chats: List<ChatRecord>,
     currentChatId: Long?,
     onSettingsClick: () -> Unit,
+    onProfileClick: () -> Unit,
     onChatSelect: (Long) -> Unit,
     onChatDelete: (Long) -> Unit,
     onNewChat: () -> Unit,
@@ -46,6 +48,24 @@ fun DrawerContent(
             style = MaterialTheme.typography.titleLarge,
             modifier = Modifier.padding(16.dp),
         )
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onProfileClick)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Default.Person,
+                contentDescription = null,
+            )
+            Spacer(modifier = Modifier.width(16.dp))
+            Text(
+                text = "Profile",
+                style = MaterialTheme.typography.bodyLarge,
+            )
+        }
 
         Row(
             modifier = Modifier
@@ -165,6 +185,7 @@ private fun DrawerContentPreview() {
             ),
             currentChatId = 2,
             onSettingsClick = {},
+            onProfileClick = {},
             onChatSelect = {},
             onChatDelete = {},
             onNewChat = {},
@@ -180,6 +201,7 @@ private fun DrawerContentEmptyPreview() {
             chats = emptyList(),
             currentChatId = null,
             onSettingsClick = {},
+            onProfileClick = {},
             onChatSelect = {},
             onChatDelete = {},
             onNewChat = {},

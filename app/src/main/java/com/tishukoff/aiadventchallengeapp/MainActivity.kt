@@ -39,6 +39,8 @@ import com.tishukoff.aiadventchallengeapp.presentation.ui.models.ChatRoute
 import com.tishukoff.core.designsystem.AiAdventChallengeAppTheme
 import com.tishukoff.feature.memory.api.MemoryRoute
 import com.tishukoff.feature.memory.impl.presentation.ui.MemoryScreen
+import com.tishukoff.feature.profile.api.ProfileRoute
+import com.tishukoff.feature.profile.impl.presentation.ui.ProfileScreen
 import com.tishukoff.feature.setting.api.SettingRoute
 import com.tishukoff.feature.setting.impl.presentation.ui.SettingScreen
 import kotlinx.coroutines.launch
@@ -76,6 +78,9 @@ fun AppNavigation() {
                     onNavigateToMemory = dropUnlessResumed {
                         backStack.add(MemoryRoute)
                     },
+                    onNavigateToProfile = dropUnlessResumed {
+                        backStack.add(ProfileRoute)
+                    },
                 )
             }
 
@@ -94,6 +99,14 @@ fun AppNavigation() {
                     },
                 )
             }
+
+            entry<ProfileRoute> {
+                ProfileScreen(
+                    onBack = dropUnlessResumed {
+                        backStack.removeLastOrNull()
+                    },
+                )
+            }
         },
     )
 }
@@ -103,6 +116,7 @@ fun AppNavigation() {
 fun ChatScreenWithDrawer(
     onNavigateToSettings: () -> Unit,
     onNavigateToMemory: () -> Unit,
+    onNavigateToProfile: () -> Unit,
     viewModel: ChatViewModel = koinViewModel(),
 ) {
     val state by viewModel.uiState.collectAsState()
@@ -119,6 +133,10 @@ fun ChatScreenWithDrawer(
                     onSettingsClick = {
                         scope.launch { drawerState.close() }
                         onNavigateToSettings()
+                    },
+                    onProfileClick = {
+                        scope.launch { drawerState.close() }
+                        onNavigateToProfile()
                     },
                     onChatSelect = { chatId ->
                         viewModel.handleIntent(ChatIntent.SelectChat(chatId))

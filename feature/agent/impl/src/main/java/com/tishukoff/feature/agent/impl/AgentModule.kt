@@ -14,6 +14,7 @@ val agentModule = module {
             chatStorage = get(),
             contextSummaryStorage = get(),
             memoryManager = get(),
+            profileProvider = get(),
         )
     }
 }
