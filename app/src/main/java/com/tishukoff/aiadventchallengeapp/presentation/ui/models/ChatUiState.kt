@@ -6,6 +6,7 @@ import com.tishukoff.feature.agent.api.ChatMessage
 import com.tishukoff.feature.agent.api.CompressionStats
 import com.tishukoff.feature.agent.api.ContextStrategyType
 import com.tishukoff.feature.agent.api.TokenStats
+import com.tishukoff.feature.taskstate.api.TaskState
 
 data class ChatUiState(
     val input: String = "",
@@ -18,4 +19,5 @@ data class ChatUiState(
     val branches: List<BranchInfo> = emptyList(),
     val currentBranchId: String? = null,
     val contextStrategyType: ContextStrategyType = ContextStrategyType.SUMMARIZATION,
+    val taskState: TaskState = TaskState(),
 )
