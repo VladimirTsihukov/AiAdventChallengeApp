@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tishukoff.core.database.api.ChatStorage
 import com.tishukoff.feature.agent.api.Agent
+import com.tishukoff.feature.taskstate.api.TaskStateMachine
 import com.tishukoff.aiadventchallengeapp.presentation.ui.models.ChatIntent
 import com.tishukoff.aiadventchallengeapp.presentation.ui.models.ChatUiState
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,6 +17,7 @@ import kotlinx.coroutines.launch
 class ChatViewModel(
     private val agent: Agent,
     private val chatStorage: ChatStorage,
+    private val taskStateMachine: TaskStateMachine,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ChatUiState())
@@ -71,6 +73,12 @@ class ChatViewModel(
                 _uiState.value = _uiState.value.copy(currentBranchId = branchId)
             }
             .launchIn(viewModelScope)
+
+        taskStateMachine.taskState
+            .onEach { taskState ->
+                _uiState.value = _uiState.value.copy(taskState = taskState)
+            }
+            .launchIn(viewModelScope)
     }
 
     fun handleIntent(intent: ChatIntent) {
@@ -86,6 +94,10 @@ class ChatViewModel(
             is ChatIntent.CreateCheckpoint -> agent.createCheckpoint(intent.name)
             is ChatIntent.CreateBranch -> agent.createBranch(intent.checkpointId, intent.name)
             is ChatIntent.SwitchBranch -> agent.switchBranch(intent.branchId)
+            is ChatIntent.StartTask -> startTask(intent.description)
+            is ChatIntent.ResumeTask -> resumeTask(intent.clarification)
+            is ChatIntent.PauseTask -> taskStateMachine.pauseTask()
+            is ChatIntent.ResetTask -> taskStateMachine.resetTask()
         }
     }
 
@@ -127,6 +139,22 @@ class ChatViewModel(
         viewModelScope.launch {
             agent.addUserMessage(message)
             agent.processRequest()
+            _uiState.value = _uiState.value.copy(isLoading = false)
+        }
+    }
+
+    private fun startTask(description: String) {
+        _uiState.value = _uiState.value.copy(isLoading = true)
+        viewModelScope.launch {
+            taskStateMachine.startTask(description)
+            _uiState.value = _uiState.value.copy(isLoading = false)
+        }
+    }
+
+    private fun resumeTask(clarification: String?) {
+        _uiState.value = _uiState.value.copy(isLoading = true)
+        viewModelScope.launch {
+            taskStateMachine.resumeTask(clarification)
             _uiState.value = _uiState.value.copy(isLoading = false)
         }
     }
