@@ -5,6 +5,7 @@ import com.tishukoff.core.database.api.ChatMessageRecord
 import com.tishukoff.core.database.api.ChatStorage
 import com.tishukoff.core.database.api.ContextSummaryStorage
 import com.tishukoff.feature.agent.api.Agent
+import com.tishukoff.feature.invariant.api.InvariantProvider
 import com.tishukoff.feature.memory.api.MemoryManager
 import com.tishukoff.feature.profile.api.ProfileProvider
 import com.tishukoff.feature.agent.api.BranchInfo
@@ -44,6 +45,7 @@ internal class ClaudeAgent(
     private val contextSummaryStorage: ContextSummaryStorage,
     private val memoryManager: MemoryManager,
     private val profileProvider: ProfileProvider,
+    private val invariantProvider: InvariantProvider,
 ) : Agent {
 
     private val client = OkHttpClient.Builder()
@@ -192,13 +194,18 @@ internal class ClaudeAgent(
 
             val profilePrompt = profileProvider.buildProfilePrompt()
             val memoryPrefix = memoryManager.buildMemoryPromptPrefix(chatId)
+            val invariantPrompt = invariantProvider.buildInvariantPrompt()
 
             if (strategyContext != null) {
                 _compressionStats.value = strategyContext.stats
                 messagesToSend = strategyContext.messagesToSend
 
                 systemPromptText = buildString {
+                    if (invariantPrompt.isNotBlank()) {
+                        append(invariantPrompt)
+                    }
                     if (profilePrompt.isNotBlank()) {
+                        if (isNotEmpty()) append("\n\n")
                         append(profilePrompt)
                     }
                     if (memoryPrefix.isNotBlank()) {
@@ -218,7 +225,11 @@ internal class ClaudeAgent(
                 _compressionStats.value = CompressionStats()
                 messagesToSend = currentMessages
                 systemPromptText = buildString {
+                    if (invariantPrompt.isNotBlank()) {
+                        append(invariantPrompt)
+                    }
                     if (profilePrompt.isNotBlank()) {
+                        if (isNotEmpty()) append("\n\n")
                         append(profilePrompt)
                     }
                     if (memoryPrefix.isNotBlank()) {

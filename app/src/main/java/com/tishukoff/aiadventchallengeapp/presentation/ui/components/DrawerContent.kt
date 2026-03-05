@@ -16,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -38,6 +39,7 @@ fun DrawerContent(
     currentChatId: Long?,
     onSettingsClick: () -> Unit,
     onProfileClick: () -> Unit,
+    onInvariantsClick: () -> Unit,
     onChatSelect: (Long) -> Unit,
     onChatDelete: (Long) -> Unit,
     onNewChat: () -> Unit,
@@ -63,6 +65,24 @@ fun DrawerContent(
             Spacer(modifier = Modifier.width(16.dp))
             Text(
                 text = "Profile",
+                style = MaterialTheme.typography.bodyLarge,
+            )
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onInvariantsClick)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Default.Lock,
+                contentDescription = null,
+            )
+            Spacer(modifier = Modifier.width(16.dp))
+            Text(
+                text = "Invariants",
                 style = MaterialTheme.typography.bodyLarge,
             )
         }
@@ -186,6 +206,7 @@ private fun DrawerContentPreview() {
             currentChatId = 2,
             onSettingsClick = {},
             onProfileClick = {},
+            onInvariantsClick = {},
             onChatSelect = {},
             onChatDelete = {},
             onNewChat = {},
@@ -202,6 +223,7 @@ private fun DrawerContentEmptyPreview() {
             currentChatId = null,
             onSettingsClick = {},
             onProfileClick = {},
+            onInvariantsClick = {},
             onChatSelect = {},
             onChatDelete = {},
             onNewChat = {},
