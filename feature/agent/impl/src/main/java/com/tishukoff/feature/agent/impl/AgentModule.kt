@@ -15,6 +15,7 @@ val agentModule = module {
             contextSummaryStorage = get(),
             memoryManager = get(),
             profileProvider = get(),
+            invariantProvider = get(),
         )
     }
 }
