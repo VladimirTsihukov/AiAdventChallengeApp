@@ -10,4 +10,7 @@ dependencies {
     implementation(project(":feature:taskstate:api"))
     implementation(project(":feature:agent:api"))
     implementation(libs.koin.android)
+
+    testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
 }

@@ -20,4 +20,5 @@ data class ChatUiState(
     val currentBranchId: String? = null,
     val contextStrategyType: ContextStrategyType = ContextStrategyType.SUMMARIZATION,
     val taskState: TaskState = TaskState(),
+    val transitionError: String? = null,
 )

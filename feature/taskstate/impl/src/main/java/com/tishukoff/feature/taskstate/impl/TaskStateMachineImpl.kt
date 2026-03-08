@@ -5,6 +5,7 @@ import com.tishukoff.feature.taskstate.api.PauseReason
 import com.tishukoff.feature.taskstate.api.TaskStage
 import com.tishukoff.feature.taskstate.api.TaskState
 import com.tishukoff.feature.taskstate.api.TaskStateMachine
+import com.tishukoff.feature.taskstate.api.TransitionResult
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
@@ -24,24 +25,86 @@ internal class TaskStateMachineImpl(
 
     private var stageJob: Job? = null
 
-    override suspend fun startTask(description: String) {
+    override suspend fun startTask(description: String): TransitionResult {
+        val current = _taskState.value
+        val result = validateTransition(current.stage, TaskStage.PLANNING)
+        if (result != null) return result
+
         _taskState.value = TaskState(
             stage = TaskStage.PLANNING,
             taskDescription = description,
         )
         runStage(TaskStage.PLANNING)
+        return TransitionResult.Success(_taskState.value)
     }
 
-    override suspend fun resumeTask(clarification: String?) {
+    override suspend fun approvePlan(clarification: String?): TransitionResult {
         val current = _taskState.value
-        if (!current.isPaused) return
+        if (!current.isPaused) {
+            return TransitionResult.Denied(
+                from = current.stage,
+                to = TaskStage.PLAN_APPROVED,
+                reason = "Нельзя утвердить план — этап ещё выполняется",
+            )
+        }
+
+        val result = validateTransition(current.stage, TaskStage.PLAN_APPROVED)
+        if (result != null) return result
+
+        val updatedClarifications = if (clarification != null) {
+            current.userClarifications + (TaskStage.EXECUTION to clarification)
+        } else {
+            current.userClarifications
+        }
+
+        _taskState.update {
+            it.copy(
+                stage = TaskStage.PLAN_APPROVED,
+                isPaused = false,
+                pauseReason = null,
+                userClarifications = updatedClarifications,
+            )
+        }
+
+        // PLAN_APPROVED automatically transitions to EXECUTION
+        _taskState.update {
+            it.copy(stage = TaskStage.EXECUTION)
+        }
+        runStage(TaskStage.EXECUTION)
+        return TransitionResult.Success(_taskState.value)
+    }
+
+    override suspend fun resumeTask(clarification: String?): TransitionResult {
+        val current = _taskState.value
+        if (!current.isPaused) {
+            return TransitionResult.Denied(
+                from = current.stage,
+                to = current.stage,
+                reason = "Задача не на паузе",
+            )
+        }
 
         val nextStage = when (current.stage) {
-            TaskStage.PLANNING -> TaskStage.EXECUTION
             TaskStage.EXECUTION -> TaskStage.VALIDATION
             TaskStage.VALIDATION -> TaskStage.DONE
-            else -> return
+            TaskStage.PLANNING -> {
+                return TransitionResult.Denied(
+                    from = TaskStage.PLANNING,
+                    to = TaskStage.EXECUTION,
+                    reason = "Нельзя перейти к выполнению без утверждения плана. Используйте 'Утвердить план'",
+                )
+            }
+            else -> {
+                return TransitionResult.Denied(
+                    from = current.stage,
+                    to = current.stage,
+                    reason = "Нет допустимого перехода из состояния ${current.stage.name}",
+                )
+            }
         }
+
+        val result = validateTransition(current.stage, nextStage)
+        if (result != null) return result
 
         val updatedClarifications = if (clarification != null) {
             current.userClarifications + (nextStage to clarification)
@@ -61,11 +124,12 @@ internal class TaskStateMachineImpl(
         if (nextStage != TaskStage.DONE) {
             runStage(nextStage)
         }
+        return TransitionResult.Success(_taskState.value)
     }
 
     override fun pauseTask() {
         val current = _taskState.value
-        if (current.stage in listOf(TaskStage.IDLE, TaskStage.DONE)) return
+        if (current.stage in listOf(TaskStage.IDLE, TaskStage.DONE, TaskStage.PLAN_APPROVED)) return
         if (current.isPaused) return
 
         stageJob?.cancel()
@@ -83,6 +147,18 @@ internal class TaskStateMachineImpl(
         stageJob?.cancel()
         stageJob = null
         _taskState.value = TaskState()
+    }
+
+    private fun validateTransition(from: TaskStage, to: TaskStage): TransitionResult.Denied? {
+        val allowed = TaskStage.allowedTransitions[from] ?: emptySet()
+        if (to !in allowed) {
+            return TransitionResult.Denied(
+                from = from,
+                to = to,
+                reason = "Переход ${from.name} → ${to.name} запрещён",
+            )
+        }
+        return null
     }
 
     private suspend fun runStage(stage: TaskStage) = coroutineScope {

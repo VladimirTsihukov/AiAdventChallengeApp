@@ -11,7 +11,9 @@ sealed interface ChatIntent {
     data class CreateBranch(val checkpointId: String, val name: String) : ChatIntent
     data class SwitchBranch(val branchId: String) : ChatIntent
     data class StartTask(val description: String) : ChatIntent
+    data class ApprovePlan(val clarification: String? = null) : ChatIntent
     data class ResumeTask(val clarification: String? = null) : ChatIntent
     data object PauseTask : ChatIntent
     data object ResetTask : ChatIntent
+    data object DismissTransitionError : ChatIntent
 }

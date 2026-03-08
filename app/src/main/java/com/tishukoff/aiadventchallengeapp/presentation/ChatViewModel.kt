@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.tishukoff.core.database.api.ChatStorage
 import com.tishukoff.feature.agent.api.Agent
 import com.tishukoff.feature.taskstate.api.TaskStateMachine
+import com.tishukoff.feature.taskstate.api.TransitionResult
 import com.tishukoff.aiadventchallengeapp.presentation.ui.models.ChatIntent
 import com.tishukoff.aiadventchallengeapp.presentation.ui.models.ChatUiState
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -95,9 +96,13 @@ class ChatViewModel(
             is ChatIntent.CreateBranch -> agent.createBranch(intent.checkpointId, intent.name)
             is ChatIntent.SwitchBranch -> agent.switchBranch(intent.branchId)
             is ChatIntent.StartTask -> startTask(intent.description)
+            is ChatIntent.ApprovePlan -> approvePlan(intent.clarification)
             is ChatIntent.ResumeTask -> resumeTask(intent.clarification)
             is ChatIntent.PauseTask -> taskStateMachine.pauseTask()
             is ChatIntent.ResetTask -> taskStateMachine.resetTask()
+            is ChatIntent.DismissTransitionError -> {
+                _uiState.value = _uiState.value.copy(transitionError = null)
+            }
         }
     }
 
@@ -144,18 +149,35 @@ class ChatViewModel(
     }
 
     private fun startTask(description: String) {
-        _uiState.value = _uiState.value.copy(isLoading = true)
+        _uiState.value = _uiState.value.copy(isLoading = true, transitionError = null)
         viewModelScope.launch {
-            taskStateMachine.startTask(description)
+            handleTransitionResult(taskStateMachine.startTask(description))
+            _uiState.value = _uiState.value.copy(isLoading = false)
+        }
+    }
+
+    private fun approvePlan(clarification: String?) {
+        _uiState.value = _uiState.value.copy(isLoading = true, transitionError = null)
+        viewModelScope.launch {
+            handleTransitionResult(taskStateMachine.approvePlan(clarification))
             _uiState.value = _uiState.value.copy(isLoading = false)
         }
     }
 
     private fun resumeTask(clarification: String?) {
-        _uiState.value = _uiState.value.copy(isLoading = true)
+        _uiState.value = _uiState.value.copy(isLoading = true, transitionError = null)
         viewModelScope.launch {
-            taskStateMachine.resumeTask(clarification)
+            handleTransitionResult(taskStateMachine.resumeTask(clarification))
             _uiState.value = _uiState.value.copy(isLoading = false)
+        }
+    }
+
+    private fun handleTransitionResult(result: TransitionResult) {
+        when (result) {
+            is TransitionResult.Success -> Unit
+            is TransitionResult.Denied -> {
+                _uiState.value = _uiState.value.copy(transitionError = result.reason)
+            }
         }
     }
 }
