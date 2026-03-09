@@ -77,9 +77,12 @@ fun ChatScreen(
             TaskStagePanel(
                 taskState = taskState,
                 isLoading = stateValue.isLoading,
+                transitionError = stateValue.transitionError,
+                onApprovePlan = { clarification -> onIntent(ChatIntent.ApprovePlan(clarification)) },
                 onResume = { clarification -> onIntent(ChatIntent.ResumeTask(clarification)) },
                 onPause = { onIntent(ChatIntent.PauseTask) },
                 onReset = { onIntent(ChatIntent.ResetTask) },
+                onDismissError = { onIntent(ChatIntent.DismissTransitionError) },
             )
         }
 
@@ -214,12 +217,16 @@ fun ChatScreen(
 private fun TaskStagePanel(
     taskState: TaskState,
     isLoading: Boolean,
+    transitionError: String?,
+    onApprovePlan: (String?) -> Unit,
     onResume: (String?) -> Unit,
     onPause: () -> Unit,
     onReset: () -> Unit,
+    onDismissError: () -> Unit,
 ) {
     val stages = listOf(
         TaskStage.PLANNING to "Planning",
+        TaskStage.PLAN_APPROVED to "Approved",
         TaskStage.EXECUTION to "Execution",
         TaskStage.VALIDATION to "Validation",
         TaskStage.DONE to "Done",
@@ -276,17 +283,42 @@ private fun TaskStagePanel(
         ) {
             stages.forEach { (stage, label) ->
                 val isActive = stage == taskState.stage
-                val isDone = stages.indexOfFirst { it.first == stage } < currentIndex
+                val isPast = stages.indexOfFirst { it.first == stage } < currentIndex
                 Text(
                     text = label,
                     style = MaterialTheme.typography.labelSmall,
                     color = when {
                         isActive -> MaterialTheme.colorScheme.primary
-                        isDone -> MaterialTheme.colorScheme.onSurfaceVariant
+                        isPast -> MaterialTheme.colorScheme.onSurfaceVariant
                         else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
                     },
                     fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
                 )
+            }
+        }
+
+        if (transitionError != null) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        MaterialTheme.colorScheme.errorContainer,
+                        shape = MaterialTheme.shapes.small,
+                    )
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = transitionError,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = onDismissError) {
+                    Text("OK", color = MaterialTheme.colorScheme.onErrorContainer)
+                }
             }
         }
 
@@ -295,7 +327,10 @@ private fun TaskStagePanel(
 
             var clarification by remember { mutableStateOf("") }
 
-            if (taskState.pauseReason == PauseReason.STAGE_COMPLETE && taskState.stage != TaskStage.DONE) {
+            val showClarificationField = taskState.pauseReason == PauseReason.STAGE_COMPLETE &&
+                taskState.stage != TaskStage.DONE
+
+            if (showClarificationField) {
                 OutlinedTextField(
                     value = clarification,
                     onValueChange = { clarification = it },
@@ -310,7 +345,17 @@ private fun TaskStagePanel(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Center,
             ) {
-                if (taskState.stage != TaskStage.DONE) {
+                if (taskState.stage == TaskStage.PLANNING) {
+                    Button(
+                        onClick = {
+                            val text = clarification.trim().ifEmpty { null }
+                            onApprovePlan(text)
+                            clarification = ""
+                        },
+                    ) {
+                        Text("Утвердить план")
+                    }
+                } else if (taskState.stage != TaskStage.DONE) {
                     Button(
                         onClick = {
                             val text = clarification.trim().ifEmpty { null }
@@ -324,7 +369,7 @@ private fun TaskStagePanel(
             }
         }
 
-        if (!taskState.isPaused && taskState.stage != TaskStage.DONE) {
+        if (!taskState.isPaused && taskState.stage !in listOf(TaskStage.DONE, TaskStage.PLAN_APPROVED)) {
             Spacer(modifier = Modifier.height(4.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -413,9 +458,12 @@ private fun TaskStagePanelPreview() {
                 planningResult = "1. Создать модели\n2. Настроить роутинг",
             ),
             isLoading = false,
+            transitionError = null,
+            onApprovePlan = {},
             onResume = {},
             onPause = {},
             onReset = {},
+            onDismissError = {},
         )
     }
 }
