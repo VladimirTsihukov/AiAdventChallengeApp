@@ -43,6 +43,8 @@ import com.tishukoff.feature.profile.api.ProfileRoute
 import com.tishukoff.feature.profile.impl.presentation.ui.ProfileScreen
 import com.tishukoff.feature.invariant.api.InvariantRoute
 import com.tishukoff.feature.invariant.impl.presentation.ui.InvariantScreen
+import com.tishukoff.feature.mcp.api.McpRoute
+import com.tishukoff.feature.mcp.impl.presentation.ui.McpScreen
 import com.tishukoff.feature.setting.api.SettingRoute
 import com.tishukoff.feature.setting.impl.presentation.ui.SettingScreen
 import kotlinx.coroutines.launch
@@ -86,6 +88,9 @@ fun AppNavigation() {
                     onNavigateToInvariants = dropUnlessResumed {
                         backStack.add(InvariantRoute)
                     },
+                    onNavigateToMcp = dropUnlessResumed {
+                        backStack.add(McpRoute)
+                    },
                 )
             }
 
@@ -120,6 +125,14 @@ fun AppNavigation() {
                     },
                 )
             }
+
+            entry<McpRoute> {
+                McpScreen(
+                    onBack = dropUnlessResumed {
+                        backStack.removeLastOrNull()
+                    },
+                )
+            }
         },
     )
 }
@@ -131,6 +144,7 @@ fun ChatScreenWithDrawer(
     onNavigateToMemory: () -> Unit,
     onNavigateToProfile: () -> Unit,
     onNavigateToInvariants: () -> Unit,
+    onNavigateToMcp: () -> Unit,
     viewModel: ChatViewModel = koinViewModel(),
 ) {
     val state by viewModel.uiState.collectAsState()
@@ -155,6 +169,10 @@ fun ChatScreenWithDrawer(
                     onInvariantsClick = {
                         scope.launch { drawerState.close() }
                         onNavigateToInvariants()
+                    },
+                    onMcpClick = {
+                        scope.launch { drawerState.close() }
+                        onNavigateToMcp()
                     },
                     onChatSelect = { chatId ->
                         viewModel.handleIntent(ChatIntent.SelectChat(chatId))

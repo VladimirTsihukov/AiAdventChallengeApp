@@ -49,6 +49,8 @@ dependencies {
     implementation(project(":feature:taskstate:impl"))
     implementation(project(":feature:invariant:api"))
     implementation(project(":feature:invariant:impl"))
+    implementation(project(":feature:mcp:api"))
+    implementation(project(":feature:mcp:impl"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
