@@ -5,11 +5,11 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.sse.SSE
+import java.util.concurrent.TimeUnit
 import io.modelcontextprotocol.kotlin.sdk.client.Client
 import io.modelcontextprotocol.kotlin.sdk.client.SseClientTransport
-import io.modelcontextprotocol.kotlin.sdk.client.StreamableHttpClientTransport
 import io.modelcontextprotocol.kotlin.sdk.types.Implementation
-import java.util.concurrent.TimeUnit
+import io.modelcontextprotocol.kotlin.sdk.types.TextContent
 
 /**
  * Wrapper around the MCP Kotlin SDK client.
@@ -52,17 +52,10 @@ class McpClientWrapper {
         )
         client = mcpClient
 
-        val transport = if (serverUrl.trimEnd('/').endsWith("/sse")) {
-            SseClientTransport(
-                client = http,
-                urlString = serverUrl,
-            )
-        } else {
-            StreamableHttpClientTransport(
-                client = http,
-                url = serverUrl,
-            )
-        }
+        val transport = SseClientTransport(
+            client = http,
+            urlString = serverUrl,
+        )
 
         mcpClient.connect(transport)
 
@@ -83,6 +76,22 @@ class McpClientWrapper {
             serverVersion = serverVersion,
             tools = tools,
         )
+    }
+
+    /**
+     * Calls a tool on the connected MCP server and returns the text result.
+     */
+    suspend fun callTool(toolName: String, arguments: Map<String, Any?>): String {
+        val mcpClient = client ?: error("Not connected to MCP server")
+
+        val result = mcpClient.callTool(
+            name = toolName,
+            arguments = arguments,
+        )
+
+        return result.content
+            .filterIsInstance<TextContent>()
+            .joinToString("\n") { it.text }
     }
 
     fun disconnect() {
