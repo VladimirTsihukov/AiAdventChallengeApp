@@ -1,6 +1,6 @@
 package com.tishukoff.feature.mcp.impl.presentation.ui
 
-import androidx.compose.animation.AnimatedContent
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,13 +8,18 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -43,8 +48,8 @@ fun McpScreen(
     onBack: () -> Unit,
     viewModel: McpViewModel = koinViewModel(),
 ) {
-    val state by viewModel.uiState.collectAsState()
-    val serverUrl by viewModel.serverUrl.collectAsState()
+    val state = viewModel.uiState.collectAsState().value
+    val serverUrl = viewModel.serverUrl.collectAsState().value
 
     Scaffold(
         topBar = {
@@ -65,13 +70,24 @@ fun McpScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(16.dp),
+                .padding(16.dp)
+                .imePadding(),
         ) {
             OutlinedTextField(
                 value = serverUrl,
                 onValueChange = { viewModel.updateServerUrl(it) },
                 label = { Text("MCP Server URL") },
                 singleLine = true,
+                trailingIcon = {
+                    if (serverUrl.isNotEmpty()) {
+                        IconButton(onClick = { viewModel.updateServerUrl("") }) {
+                            Icon(
+                                imageVector = Icons.Default.Clear,
+                                contentDescription = "Clear",
+                            )
+                        }
+                    }
+                },
                 modifier = Modifier.fillMaxWidth(),
             )
 
@@ -96,45 +112,42 @@ fun McpScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            AnimatedContent(
-                targetState = state,
-                label = "mcp_state",
-            ) { currentState ->
-                when (currentState) {
-                    is McpUiState.Idle -> {
-                        Text(
-                            text = "Enter MCP server URL and tap Connect",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
+            when (state) {
+                is McpUiState.Idle -> {
+                    Text(
+                        text = "Enter MCP server URL and tap Connect",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
 
-                    is McpUiState.Connecting -> {
-                        Column(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                        ) {
-                            CircularProgressIndicator()
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text("Connecting to MCP server...")
-                        }
+                is McpUiState.Connecting -> {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        CircularProgressIndicator()
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Connecting to MCP server...")
                     }
+                }
 
-                    is McpUiState.Connected -> {
-                        ConnectedContent(
-                            serverName = currentState.serverName,
-                            serverVersion = currentState.serverVersion,
-                            tools = currentState.tools,
-                        )
-                    }
+                is McpUiState.Connected -> {
+                    ConnectedContent(
+                        state = state,
+                        onToolSelected = { viewModel.selectTool(it) },
+                        onArgumentChanged = { key, value -> viewModel.updateToolArgument(key, value) },
+                        onCallTool = { viewModel.callTool() },
+                        onClearResult = { viewModel.clearToolResult() },
+                    )
+                }
 
-                    is McpUiState.Error -> {
-                        Text(
-                            text = "Error: ${currentState.message}",
-                            color = MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                    }
+                is McpUiState.Error -> {
+                    Text(
+                        text = "Error: ${state.message}",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
                 }
             }
         }
@@ -143,36 +156,70 @@ fun McpScreen(
 
 @Composable
 private fun ConnectedContent(
-    serverName: String,
-    serverVersion: String,
-    tools: List<McpTool>,
+    state: McpUiState.Connected,
+    onToolSelected: (McpTool) -> Unit,
+    onArgumentChanged: (String, String) -> Unit,
+    onCallTool: () -> Unit,
+    onClearResult: () -> Unit,
 ) {
     LazyColumn(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         item {
             Text(
-                text = "Server: $serverName v$serverVersion",
+                text = "Server: ${state.serverName} v${state.serverVersion}",
                 style = MaterialTheme.typography.titleSmall,
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "Available tools: ${tools.size}",
+                text = "Available tools: ${state.tools.size}",
                 style = MaterialTheme.typography.bodyMedium,
             )
             Spacer(modifier = Modifier.height(8.dp))
         }
 
-        items(tools, key = { it.name }) { tool ->
-            ToolCard(tool = tool)
+        items(state.tools, key = { it.name }) { tool ->
+            val isSelected = state.selectedTool?.name == tool.name
+            ToolCard(
+                tool = tool,
+                isSelected = isSelected,
+                onClick = { onToolSelected(tool) },
+            )
+        }
+
+        if (state.selectedTool != null) {
+            item {
+                ToolCallSection(
+                    tool = state.selectedTool,
+                    arguments = state.toolArguments,
+                    result = state.toolResult,
+                    isCalling = state.isCallingTool,
+                    onArgumentChanged = onArgumentChanged,
+                    onCallTool = onCallTool,
+                    onClearResult = onClearResult,
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun ToolCard(tool: McpTool) {
+private fun ToolCard(
+    tool: McpTool,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        colors = if (isSelected) {
+            CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+            )
+        } else {
+            CardDefaults.cardColors()
+        },
     ) {
         Column(
             modifier = Modifier.padding(12.dp),
@@ -188,13 +235,88 @@ private fun ToolCard(tool: McpTool) {
                     style = MaterialTheme.typography.bodyMedium,
                 )
             }
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = tool.inputSchemaJson,
-                style = MaterialTheme.typography.bodySmall,
-                fontFamily = FontFamily.Monospace,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
         }
     }
+}
+
+@Composable
+private fun ToolCallSection(
+    tool: McpTool,
+    arguments: Map<String, String>,
+    result: String?,
+    isCalling: Boolean,
+    onArgumentChanged: (String, String) -> Unit,
+    onCallTool: () -> Unit,
+    onClearResult: () -> Unit,
+) {
+    Column {
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = "Call: ${tool.name}",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        val paramNames = parseParamNames(tool.inputSchemaJson)
+        paramNames.forEach { param ->
+            OutlinedTextField(
+                value = arguments[param].orEmpty(),
+                onValueChange = { onArgumentChanged(param, it) },
+                label = { Text(param) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = onCallTool,
+                enabled = !isCalling,
+            ) {
+                if (isCalling) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.padding(end = 8.dp),
+                        strokeWidth = 2.dp,
+                    )
+                }
+                Text("Call Tool")
+            }
+
+            if (result != null) {
+                OutlinedButton(onClick = onClearResult) {
+                    Text("Clear")
+                }
+            }
+        }
+
+        if (result != null) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = "Result:",
+                style = MaterialTheme.typography.titleSmall,
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = result,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier
+                        .padding(12.dp)
+                        .fillMaxWidth(),
+                )
+            }
+        }
+    }
+}
+
+private fun parseParamNames(inputSchemaJson: String): List<String> {
+    val regex = """"(\w+)"\s*:\s*\{""".toRegex()
+    return regex.findAll(inputSchemaJson)
+        .map { it.groupValues[1] }
+        .filter { it != "type" && it != "properties" }
+        .toList()
 }

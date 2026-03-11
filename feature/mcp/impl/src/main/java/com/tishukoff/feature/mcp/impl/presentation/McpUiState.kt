@@ -11,6 +11,10 @@ sealed interface McpUiState {
         val serverName: String,
         val serverVersion: String,
         val tools: List<McpTool>,
+        val selectedTool: McpTool? = null,
+        val toolArguments: Map<String, String> = emptyMap(),
+        val toolResult: String? = null,
+        val isCallingTool: Boolean = false,
     ) : McpUiState
 
     data class Error(val message: String) : McpUiState
