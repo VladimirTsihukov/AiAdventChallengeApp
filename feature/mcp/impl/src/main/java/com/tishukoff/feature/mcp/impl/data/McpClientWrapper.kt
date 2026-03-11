@@ -94,6 +94,21 @@ class McpClientWrapper {
             .joinToString("\n") { it.text }
     }
 
+    /**
+     * Returns the list of tools from the currently connected MCP server.
+     */
+    suspend fun listTools(): List<McpTool> {
+        val mcpClient = client ?: error("Not connected to MCP server")
+        val toolsResult = mcpClient.listTools()
+        return toolsResult.tools.map { tool ->
+            McpTool(
+                name = tool.name,
+                description = tool.description.orEmpty(),
+                inputSchemaJson = tool.inputSchema.toString(),
+            )
+        }
+    }
+
     fun disconnect() {
         client = null
         httpClient?.close()

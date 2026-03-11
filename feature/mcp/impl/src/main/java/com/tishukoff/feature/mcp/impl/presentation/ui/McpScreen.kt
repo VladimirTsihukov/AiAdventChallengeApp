@@ -46,6 +46,7 @@ import org.koin.androidx.compose.koinViewModel
 @Composable
 fun McpScreen(
     onBack: () -> Unit,
+    onNavigateToScheduler: () -> Unit = {},
     viewModel: McpViewModel = koinViewModel(),
 ) {
     val state = viewModel.uiState.collectAsState().value
@@ -139,6 +140,7 @@ fun McpScreen(
                         onArgumentChanged = { key, value -> viewModel.updateToolArgument(key, value) },
                         onCallTool = { viewModel.callTool() },
                         onClearResult = { viewModel.clearToolResult() },
+                        onNavigateToScheduler = onNavigateToScheduler,
                     )
                 }
 
@@ -161,6 +163,7 @@ private fun ConnectedContent(
     onArgumentChanged: (String, String) -> Unit,
     onCallTool: () -> Unit,
     onClearResult: () -> Unit,
+    onNavigateToScheduler: () -> Unit,
 ) {
     LazyColumn(
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -175,6 +178,13 @@ private fun ConnectedContent(
                 text = "Available tools: ${state.tools.size}",
                 style = MaterialTheme.typography.bodyMedium,
             )
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(
+                onClick = onNavigateToScheduler,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Scheduled Tasks")
+            }
             Spacer(modifier = Modifier.height(8.dp))
         }
 
