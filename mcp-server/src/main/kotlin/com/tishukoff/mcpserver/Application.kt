@@ -1,5 +1,13 @@
 package com.tishukoff.mcpserver
 
+import com.tishukoff.mcpserver.pipeline.PipelineConfig
+import com.tishukoff.mcpserver.pipeline.PipelineExecutor
+import com.tishukoff.mcpserver.pipeline.PipelineInfo
+import com.tishukoff.mcpserver.pipeline.PipelineStatus
+import com.tishukoff.mcpserver.pipeline.PipelineStepResult
+import com.tishukoff.mcpserver.pipeline.PipelineStepStatus
+import com.tishukoff.mcpserver.pipeline.PipelineStepType
+import com.tishukoff.mcpserver.pipeline.PipelineStorage
 import com.tishukoff.mcpserver.scheduler.ScheduledTask
 import com.tishukoff.mcpserver.scheduler.TaskScheduler
 import com.tishukoff.mcpserver.scheduler.TaskStorage
@@ -27,9 +35,20 @@ fun main() {
     val port = (env["PORT"] ?: System.getenv("PORT"))?.toIntOrNull() ?: 3000
     val githubToken = env["GITHUB_TOKEN"] ?: System.getenv("GITHUB_TOKEN")
 
+    val telegramBotToken = env["TELEGRAM_BOT_TOKEN"] ?: System.getenv("TELEGRAM_BOT_TOKEN")
+    val telegramChatId = env["TELEGRAM_CHAT_ID"] ?: System.getenv("TELEGRAM_CHAT_ID")
+    val telegram = if (!telegramBotToken.isNullOrBlank() && !telegramChatId.isNullOrBlank()) {
+        TelegramClient(botToken = telegramBotToken, chatId = telegramChatId)
+    } else {
+        println("WARNING: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set — Telegram step will be unavailable")
+        null
+    }
+
     val github = GitHubApiClient(token = githubToken)
     val storage = TaskStorage()
     val scheduler = TaskScheduler(storage, github)
+    val pipelineStorage = PipelineStorage()
+    val pipelineExecutor = PipelineExecutor(pipelineStorage, github, telegram)
 
     scheduler.start()
 
@@ -39,7 +58,7 @@ fun main() {
 
     embeddedServer(Netty, host = "0.0.0.0", port = port) {
         mcp {
-            createMcpServer(github, storage)
+            createMcpServer(github, storage, pipelineStorage, pipelineExecutor)
         }
     }.start(wait = true)
 }
@@ -55,7 +74,12 @@ private fun loadEnv(): Map<String, String> {
 
 private val prettyJson = Json { prettyPrint = true }
 
-fun createMcpServer(github: GitHubApiClient, storage: TaskStorage): Server {
+fun createMcpServer(
+    github: GitHubApiClient,
+    storage: TaskStorage,
+    pipelineStorage: PipelineStorage,
+    pipelineExecutor: PipelineExecutor,
+): Server {
     val server = Server(
         serverInfo = Implementation(
             name = "github-mcp-server",
@@ -414,6 +438,177 @@ fun createMcpServer(github: GitHubApiClient, storage: TaskStorage): Server {
             results,
         )
         CallToolResult(content = listOf(TextContent(response)))
+    }
+
+    // --- Pipeline tools ---
+
+    server.addTool(
+        name = "create_pipeline",
+        description = "Create and run a pipeline that chains steps: search → summarize → save_to_file → send_to_telegram. Each step can be enabled/disabled. The pipeline runs in background on the server.",
+        inputSchema = ToolSchema(
+            properties = buildJsonObject {
+                putJsonObject("query") {
+                    put("type", "string")
+                    put("description", "Search query for GitHub repositories")
+                }
+                putJsonObject("filename") {
+                    put("type", "string")
+                    put("description", "Output filename for save_to_file step (default: pipeline_result.txt)")
+                }
+                putJsonObject("per_page") {
+                    put("type", "integer")
+                    put("description", "Number of search results (1-10, default 5)")
+                }
+                putJsonObject("search_enabled") {
+                    put("type", "boolean")
+                    put("description", "Enable search step (default true)")
+                }
+                putJsonObject("summarize_enabled") {
+                    put("type", "boolean")
+                    put("description", "Enable summarize step (default true)")
+                }
+                putJsonObject("save_to_file_enabled") {
+                    put("type", "boolean")
+                    put("description", "Enable save_to_file step (default true)")
+                }
+                putJsonObject("send_to_telegram_enabled") {
+                    put("type", "boolean")
+                    put("description", "Enable send_to_telegram step (default false)")
+                }
+            },
+            required = listOf("query"),
+        ),
+    ) { request ->
+        val query = request.arguments?.get("query")?.jsonPrimitive?.content
+        if (query.isNullOrBlank()) {
+            return@addTool CallToolResult(
+                content = listOf(TextContent("Error: 'query' is required")),
+                isError = true,
+            )
+        }
+
+        val filename = request.arguments?.get("filename")?.jsonPrimitive?.content ?: "pipeline_result.txt"
+        val perPage = request.arguments?.get("per_page")?.jsonPrimitive?.content?.toIntOrNull() ?: 5
+        val searchEnabled = request.arguments?.get("search_enabled")?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: true
+        val summarizeEnabled = request.arguments?.get("summarize_enabled")?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: true
+        val saveToFileEnabled = request.arguments?.get("save_to_file_enabled")?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: true
+        val sendToTelegramEnabled = request.arguments?.get("send_to_telegram_enabled")?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: false
+
+        if (!searchEnabled && !summarizeEnabled && !saveToFileEnabled && !sendToTelegramEnabled) {
+            return@addTool CallToolResult(
+                content = listOf(TextContent("Error: at least one step must be enabled")),
+                isError = true,
+            )
+        }
+
+        val config = PipelineConfig(
+            searchEnabled = searchEnabled,
+            summarizeEnabled = summarizeEnabled,
+            saveToFileEnabled = saveToFileEnabled,
+            sendToTelegramEnabled = sendToTelegramEnabled,
+            query = query,
+            filename = filename,
+            perPage = perPage.coerceIn(1, 10),
+        )
+
+        val steps = buildList {
+            add(PipelineStepResult(
+                step = PipelineStepType.SEARCH.name,
+                status = if (searchEnabled) PipelineStepStatus.PENDING.name else PipelineStepStatus.SKIPPED.name,
+            ))
+            add(PipelineStepResult(
+                step = PipelineStepType.SUMMARIZE.name,
+                status = if (summarizeEnabled) PipelineStepStatus.PENDING.name else PipelineStepStatus.SKIPPED.name,
+            ))
+            add(PipelineStepResult(
+                step = PipelineStepType.SAVE_TO_FILE.name,
+                status = if (saveToFileEnabled) PipelineStepStatus.PENDING.name else PipelineStepStatus.SKIPPED.name,
+            ))
+            add(PipelineStepResult(
+                step = PipelineStepType.SEND_TO_TELEGRAM.name,
+                status = if (sendToTelegramEnabled) PipelineStepStatus.PENDING.name else PipelineStepStatus.SKIPPED.name,
+            ))
+        }
+
+        val pipeline = PipelineInfo(
+            id = UUID.randomUUID().toString(),
+            config = config,
+            status = PipelineStatus.RUNNING.name,
+            steps = steps,
+            createdAt = System.currentTimeMillis(),
+        )
+
+        pipelineStorage.save(pipeline)
+        pipelineExecutor.execute(pipeline)
+
+        val response = prettyJson.encodeToString(PipelineInfo.serializer(), pipeline)
+        CallToolResult(content = listOf(TextContent(response)))
+    }
+
+    server.addTool(
+        name = "get_pipeline_status",
+        description = "Get the current status of a pipeline, including progress of each step.",
+        inputSchema = ToolSchema(
+            properties = buildJsonObject {
+                putJsonObject("pipeline_id") {
+                    put("type", "string")
+                    put("description", "Pipeline ID")
+                }
+            },
+            required = listOf("pipeline_id"),
+        ),
+    ) { request ->
+        val pipelineId = request.arguments?.get("pipeline_id")?.jsonPrimitive?.content
+        if (pipelineId.isNullOrBlank()) {
+            return@addTool CallToolResult(
+                content = listOf(TextContent("Error: 'pipeline_id' is required")),
+                isError = true,
+            )
+        }
+
+        val pipeline = pipelineStorage.get(pipelineId)
+        if (pipeline == null) {
+            return@addTool CallToolResult(
+                content = listOf(TextContent("Error: pipeline '$pipelineId' not found")),
+                isError = true,
+            )
+        }
+
+        val response = prettyJson.encodeToString(PipelineInfo.serializer(), pipeline)
+        CallToolResult(content = listOf(TextContent(response)))
+    }
+
+    server.addTool(
+        name = "cancel_pipeline",
+        description = "Cancel a running pipeline.",
+        inputSchema = ToolSchema(
+            properties = buildJsonObject {
+                putJsonObject("pipeline_id") {
+                    put("type", "string")
+                    put("description", "Pipeline ID to cancel")
+                }
+            },
+            required = listOf("pipeline_id"),
+        ),
+    ) { request ->
+        val pipelineId = request.arguments?.get("pipeline_id")?.jsonPrimitive?.content
+        if (pipelineId.isNullOrBlank()) {
+            return@addTool CallToolResult(
+                content = listOf(TextContent("Error: 'pipeline_id' is required")),
+                isError = true,
+            )
+        }
+
+        val pipeline = pipelineStorage.get(pipelineId)
+        if (pipeline == null) {
+            return@addTool CallToolResult(
+                content = listOf(TextContent("Error: pipeline '$pipelineId' not found")),
+                isError = true,
+            )
+        }
+
+        pipelineExecutor.cancel(pipelineId)
+        CallToolResult(content = listOf(TextContent("Pipeline '$pipelineId' cancelled")))
     }
 
     return server
