@@ -11,6 +11,8 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 class GitHubApiClient(
     private val token: String?,
@@ -61,6 +63,30 @@ class GitHubApiClient(
             return """{"error": "GitHub API returned ${response.status.value}: ${response.bodyAsText()}"}"""
         }
         return response.bodyAsText()
+    }
+
+    /**
+     * Returns a compact summary of repository info (name, stars, forks, language, description).
+     */
+    suspend fun getRepositorySummary(owner: String, repo: String): String {
+        val response = httpClient.get("$BASE_URL/repos/$owner/$repo") {
+            applyAuth()
+        }
+        if (!response.status.isSuccess()) {
+            return """{"error": "GitHub API returned ${response.status.value}"}"""
+        }
+        val full = Json.parseToJsonElement(response.bodyAsText()).jsonObject
+        val fields = listOf(
+            "full_name", "description", "language",
+            "stargazers_count", "forks_count", "open_issues_count",
+            "updated_at",
+        )
+        val summary = kotlinx.serialization.json.buildJsonObject {
+            for (key in fields) {
+                put(key, full[key] ?: kotlinx.serialization.json.JsonNull)
+            }
+        }
+        return summary.toString()
     }
 
     private fun io.ktor.client.request.HttpRequestBuilder.applyAuth() {

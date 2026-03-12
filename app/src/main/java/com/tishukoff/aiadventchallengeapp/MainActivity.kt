@@ -44,7 +44,9 @@ import com.tishukoff.feature.profile.impl.presentation.ui.ProfileScreen
 import com.tishukoff.feature.invariant.api.InvariantRoute
 import com.tishukoff.feature.invariant.impl.presentation.ui.InvariantScreen
 import com.tishukoff.feature.mcp.api.McpRoute
+import com.tishukoff.feature.mcp.api.McpSchedulerRoute
 import com.tishukoff.feature.mcp.impl.presentation.ui.McpScreen
+import com.tishukoff.feature.mcp.impl.presentation.scheduler.ui.SchedulerScreen
 import com.tishukoff.feature.setting.api.SettingRoute
 import com.tishukoff.feature.setting.impl.presentation.ui.SettingScreen
 import kotlinx.coroutines.launch
@@ -128,6 +130,17 @@ fun AppNavigation() {
 
             entry<McpRoute> {
                 McpScreen(
+                    onBack = dropUnlessResumed {
+                        backStack.removeLastOrNull()
+                    },
+                    onNavigateToScheduler = dropUnlessResumed {
+                        backStack.add(McpSchedulerRoute)
+                    },
+                )
+            }
+
+            entry<McpSchedulerRoute> {
+                SchedulerScreen(
                     onBack = dropUnlessResumed {
                         backStack.removeLastOrNull()
                     },

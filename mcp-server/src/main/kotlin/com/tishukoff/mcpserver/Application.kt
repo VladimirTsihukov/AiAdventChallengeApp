@@ -1,9 +1,13 @@
 package com.tishukoff.mcpserver
 
+import com.tishukoff.mcpserver.scheduler.ScheduledTask
+import com.tishukoff.mcpserver.scheduler.TaskScheduler
+import com.tishukoff.mcpserver.scheduler.TaskStorage
 import io.ktor.server.netty.Netty
 import io.ktor.server.engine.embeddedServer
 import java.io.File
 import java.util.Properties
+import java.util.UUID
 import io.modelcontextprotocol.kotlin.sdk.server.Server
 import io.modelcontextprotocol.kotlin.sdk.server.ServerOptions
 import io.modelcontextprotocol.kotlin.sdk.server.mcp
@@ -12,6 +16,7 @@ import io.modelcontextprotocol.kotlin.sdk.types.Implementation
 import io.modelcontextprotocol.kotlin.sdk.types.ServerCapabilities
 import io.modelcontextprotocol.kotlin.sdk.types.TextContent
 import io.modelcontextprotocol.kotlin.sdk.types.ToolSchema
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -23,12 +28,18 @@ fun main() {
     val githubToken = env["GITHUB_TOKEN"] ?: System.getenv("GITHUB_TOKEN")
 
     val github = GitHubApiClient(token = githubToken)
+    val storage = TaskStorage()
+    val scheduler = TaskScheduler(storage, github)
+
+    scheduler.start()
+
+    Runtime.getRuntime().addShutdownHook(Thread { scheduler.stop() })
 
     println("Starting GitHub MCP Server on port $port...")
 
     embeddedServer(Netty, host = "0.0.0.0", port = port) {
         mcp {
-            createMcpServer(github)
+            createMcpServer(github, storage)
         }
     }.start(wait = true)
 }
@@ -42,7 +53,9 @@ private fun loadEnv(): Map<String, String> {
     return props.entries.associate { (k, v) -> k.toString() to v.toString() }
 }
 
-fun createMcpServer(github: GitHubApiClient): Server {
+private val prettyJson = Json { prettyPrint = true }
+
+fun createMcpServer(github: GitHubApiClient, storage: TaskStorage): Server {
     val server = Server(
         serverInfo = Implementation(
             name = "github-mcp-server",
@@ -151,6 +164,256 @@ fun createMcpServer(github: GitHubApiClient): Server {
 
         val result = github.getFileContent(owner, repo, path)
         CallToolResult(content = listOf(TextContent(result)))
+    }
+
+    server.addTool(
+        name = "get_repository_summary",
+        description = "Get a compact summary of a GitHub repository (name, stars, forks, language, description). Lightweight alternative to get_repository.",
+        inputSchema = ToolSchema(
+            properties = buildJsonObject {
+                putJsonObject("owner") {
+                    put("type", "string")
+                    put("description", "Repository owner (user or organization)")
+                }
+                putJsonObject("repo") {
+                    put("type", "string")
+                    put("description", "Repository name")
+                }
+            },
+            required = listOf("owner", "repo"),
+        ),
+    ) { request ->
+        val owner = request.arguments?.get("owner")?.jsonPrimitive?.content
+        val repo = request.arguments?.get("repo")?.jsonPrimitive?.content
+
+        if (owner.isNullOrBlank() || repo.isNullOrBlank()) {
+            return@addTool CallToolResult(
+                content = listOf(TextContent("Error: 'owner' and 'repo' are required")),
+                isError = true,
+            )
+        }
+
+        val result = github.getRepositorySummary(owner, repo)
+        CallToolResult(content = listOf(TextContent(result)))
+    }
+
+    // --- Scheduler tools ---
+
+    server.addTool(
+        name = "create_scheduled_task",
+        description = "Create a scheduled task that periodically calls a GitHub tool. The task will auto-expire after the specified duration.",
+        inputSchema = ToolSchema(
+            properties = buildJsonObject {
+                putJsonObject("name") {
+                    put("type", "string")
+                    put("description", "Task name (e.g. 'Track Kotlin repo stars')")
+                }
+                putJsonObject("tool_name") {
+                    put("type", "string")
+                    put("description", "Tool to call: get_repository, search_repositories, or get_file_content")
+                }
+                putJsonObject("tool_arguments") {
+                    put("type", "string")
+                    put("description", "JSON string with tool arguments, e.g. {\"owner\":\"JetBrains\",\"repo\":\"kotlin\"}")
+                }
+                putJsonObject("interval_minutes") {
+                    put("type", "integer")
+                    put("description", "How often to run (in minutes). E.g. 1, 60, 1440")
+                }
+                putJsonObject("duration_minutes") {
+                    put("type", "integer")
+                    put("description", "How long the task stays active (in minutes). E.g. 60, 1440, 10080")
+                }
+            },
+            required = listOf("name", "tool_name", "tool_arguments", "interval_minutes", "duration_minutes"),
+        ),
+    ) { request ->
+        val name = request.arguments?.get("name")?.jsonPrimitive?.content
+        val toolName = request.arguments?.get("tool_name")?.jsonPrimitive?.content
+        val toolArgsJson = request.arguments?.get("tool_arguments")?.jsonPrimitive?.content
+        val intervalMinutes = request.arguments?.get("interval_minutes")?.jsonPrimitive?.content?.toIntOrNull()
+        val durationMinutes = request.arguments?.get("duration_minutes")?.jsonPrimitive?.content?.toIntOrNull()
+
+        if (name.isNullOrBlank() || toolName.isNullOrBlank() || toolArgsJson.isNullOrBlank()
+            || intervalMinutes == null || durationMinutes == null
+        ) {
+            return@addTool CallToolResult(
+                content = listOf(TextContent("Error: all parameters are required")),
+                isError = true,
+            )
+        }
+
+        val validTools = listOf("get_repository", "get_repository_summary", "search_repositories", "get_file_content")
+        if (toolName !in validTools) {
+            return@addTool CallToolResult(
+                content = listOf(TextContent("Error: tool_name must be one of: $validTools")),
+                isError = true,
+            )
+        }
+
+        val toolArguments = try {
+            Json.decodeFromString<Map<String, String>>(toolArgsJson)
+        } catch (e: Exception) {
+            return@addTool CallToolResult(
+                content = listOf(TextContent("Error: tool_arguments must be a valid JSON object: ${e.message}")),
+                isError = true,
+            )
+        }
+
+        val now = System.currentTimeMillis()
+        val task = ScheduledTask(
+            id = UUID.randomUUID().toString(),
+            name = name,
+            toolName = toolName,
+            toolArguments = toolArguments,
+            intervalMinutes = intervalMinutes,
+            durationMinutes = durationMinutes,
+            createdAt = now,
+            expiresAt = now + durationMinutes * 60_000L,
+        )
+
+        storage.addTask(task)
+
+        val response = prettyJson.encodeToString(ScheduledTask.serializer(), task)
+        CallToolResult(content = listOf(TextContent("Task created:\n$response")))
+    }
+
+    server.addTool(
+        name = "list_scheduled_tasks",
+        description = "List all scheduled tasks with their status.",
+        inputSchema = ToolSchema(
+            properties = buildJsonObject {},
+            required = emptyList(),
+        ),
+    ) { _ ->
+        val tasks = storage.getTasks()
+        if (tasks.isEmpty()) {
+            return@addTool CallToolResult(content = listOf(TextContent("No scheduled tasks")))
+        }
+
+        val response = prettyJson.encodeToString(
+            kotlinx.serialization.builtins.ListSerializer(ScheduledTask.serializer()),
+            tasks,
+        )
+        CallToolResult(content = listOf(TextContent(response)))
+    }
+
+    server.addTool(
+        name = "delete_scheduled_task",
+        description = "Delete a scheduled task by ID.",
+        inputSchema = ToolSchema(
+            properties = buildJsonObject {
+                putJsonObject("task_id") {
+                    put("type", "string")
+                    put("description", "Task ID to delete")
+                }
+            },
+            required = listOf("task_id"),
+        ),
+    ) { request ->
+        val taskId = request.arguments?.get("task_id")?.jsonPrimitive?.content
+
+        if (taskId.isNullOrBlank()) {
+            return@addTool CallToolResult(
+                content = listOf(TextContent("Error: 'task_id' is required")),
+                isError = true,
+            )
+        }
+
+        val tasks = storage.getTasks()
+        if (tasks.none { it.id == taskId }) {
+            return@addTool CallToolResult(
+                content = listOf(TextContent("Error: task '$taskId' not found")),
+                isError = true,
+            )
+        }
+
+        storage.removeTask(taskId)
+        CallToolResult(content = listOf(TextContent("Task '$taskId' deleted")))
+    }
+
+    server.addTool(
+        name = "toggle_scheduled_task",
+        description = "Enable or disable a scheduled task.",
+        inputSchema = ToolSchema(
+            properties = buildJsonObject {
+                putJsonObject("task_id") {
+                    put("type", "string")
+                    put("description", "Task ID to toggle")
+                }
+                putJsonObject("is_active") {
+                    put("type", "boolean")
+                    put("description", "true to enable, false to disable")
+                }
+            },
+            required = listOf("task_id", "is_active"),
+        ),
+    ) { request ->
+        val taskId = request.arguments?.get("task_id")?.jsonPrimitive?.content
+        val isActive = request.arguments?.get("is_active")?.jsonPrimitive?.content?.toBooleanStrictOrNull()
+
+        if (taskId.isNullOrBlank() || isActive == null) {
+            return@addTool CallToolResult(
+                content = listOf(TextContent("Error: 'task_id' and 'is_active' are required")),
+                isError = true,
+            )
+        }
+
+        val tasks = storage.getTasks()
+        val task = tasks.find { it.id == taskId }
+        if (task == null) {
+            return@addTool CallToolResult(
+                content = listOf(TextContent("Error: task '$taskId' not found")),
+                isError = true,
+            )
+        }
+
+        storage.updateTask(task.copy(isActive = isActive))
+        val status = if (isActive) "enabled" else "disabled"
+        CallToolResult(content = listOf(TextContent("Task '${task.name}' $status")))
+    }
+
+    server.addTool(
+        name = "get_task_results",
+        description = "Get execution results for a scheduled task.",
+        inputSchema = ToolSchema(
+            properties = buildJsonObject {
+                putJsonObject("task_id") {
+                    put("type", "string")
+                    put("description", "Task ID")
+                }
+                putJsonObject("limit") {
+                    put("type", "integer")
+                    put("description", "Max number of results to return (default 10)")
+                }
+            },
+            required = listOf("task_id"),
+        ),
+    ) { request ->
+        val taskId = request.arguments?.get("task_id")?.jsonPrimitive?.content
+        val limit = request.arguments?.get("limit")?.jsonPrimitive?.content?.toIntOrNull() ?: 10
+
+        if (taskId.isNullOrBlank()) {
+            return@addTool CallToolResult(
+                content = listOf(TextContent("Error: 'task_id' is required")),
+                isError = true,
+            )
+        }
+
+        val results = storage.getResults(taskId, limit)
+        if (results.isEmpty()) {
+            return@addTool CallToolResult(
+                content = listOf(TextContent("No results yet for task '$taskId'")),
+            )
+        }
+
+        val response = prettyJson.encodeToString(
+            kotlinx.serialization.builtins.ListSerializer(
+                com.tishukoff.mcpserver.scheduler.TaskExecutionResult.serializer()
+            ),
+            results,
+        )
+        CallToolResult(content = listOf(TextContent(response)))
     }
 
     return server
