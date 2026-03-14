@@ -43,8 +43,10 @@ import com.tishukoff.feature.profile.api.ProfileRoute
 import com.tishukoff.feature.profile.impl.presentation.ui.ProfileScreen
 import com.tishukoff.feature.invariant.api.InvariantRoute
 import com.tishukoff.feature.invariant.impl.presentation.ui.InvariantScreen
+import com.tishukoff.feature.mcp.api.McpPipelineRoute
 import com.tishukoff.feature.mcp.api.McpRoute
 import com.tishukoff.feature.mcp.api.McpSchedulerRoute
+import com.tishukoff.feature.mcp.impl.presentation.pipeline.ui.PipelineScreen
 import com.tishukoff.feature.mcp.impl.presentation.ui.McpScreen
 import com.tishukoff.feature.mcp.impl.presentation.scheduler.ui.SchedulerScreen
 import com.tishukoff.feature.setting.api.SettingRoute
@@ -136,11 +138,22 @@ fun AppNavigation() {
                     onNavigateToScheduler = dropUnlessResumed {
                         backStack.add(McpSchedulerRoute)
                     },
+                    onNavigateToPipeline = dropUnlessResumed {
+                        backStack.add(McpPipelineRoute)
+                    },
                 )
             }
 
             entry<McpSchedulerRoute> {
                 SchedulerScreen(
+                    onBack = dropUnlessResumed {
+                        backStack.removeLastOrNull()
+                    },
+                )
+            }
+
+            entry<McpPipelineRoute> {
+                PipelineScreen(
                     onBack = dropUnlessResumed {
                         backStack.removeLastOrNull()
                     },

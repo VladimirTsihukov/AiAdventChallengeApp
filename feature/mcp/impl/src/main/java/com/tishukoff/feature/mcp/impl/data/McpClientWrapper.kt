@@ -37,9 +37,9 @@ class McpClientWrapper {
             }
             install(SSE)
             install(HttpTimeout) {
-                requestTimeoutMillis = 60_000
+                requestTimeoutMillis = Long.MAX_VALUE
                 connectTimeoutMillis = 30_000
-                socketTimeoutMillis = 60_000
+                socketTimeoutMillis = Long.MAX_VALUE
             }
         }
         httpClient = http

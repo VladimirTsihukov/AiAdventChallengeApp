@@ -10,3 +10,4 @@
 local.properties
 /mcp-server/.kotlin/
 /mcp-server/scheduled_tasks.json
+/mcp-server/pipeline_output/
