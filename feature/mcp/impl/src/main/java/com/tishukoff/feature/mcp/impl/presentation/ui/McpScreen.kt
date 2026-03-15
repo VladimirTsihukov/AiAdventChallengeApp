@@ -48,6 +48,7 @@ fun McpScreen(
     onBack: () -> Unit,
     onNavigateToScheduler: () -> Unit = {},
     onNavigateToPipeline: () -> Unit = {},
+    onNavigateToOrchestration: () -> Unit = {},
     viewModel: McpViewModel = koinViewModel(),
 ) {
     val state = viewModel.uiState.collectAsState().value
@@ -110,6 +111,15 @@ fun McpScreen(
                         Text("Disconnect")
                     }
                 }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Button(
+                onClick = onNavigateToOrchestration,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Orchestration (Multi-Server Agent)")
             }
 
             Spacer(modifier = Modifier.height(16.dp))

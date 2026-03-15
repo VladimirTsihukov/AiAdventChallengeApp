@@ -10,6 +10,7 @@ android {
 
 dependencies {
     implementation(project(":feature:mcp:api"))
+    implementation(project(":feature:agent:api"))
     implementation(libs.mcp.kotlin.sdk.client)
     implementation(libs.ktor.client.okhttp)
     implementation(libs.kotlinx.serialization.json)

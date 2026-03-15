@@ -5,9 +5,6 @@ import com.tishukoff.core.database.api.ChatMessageRecord
 import com.tishukoff.core.database.api.ChatStorage
 import com.tishukoff.core.database.api.ContextSummaryStorage
 import com.tishukoff.feature.agent.api.Agent
-import com.tishukoff.feature.invariant.api.InvariantProvider
-import com.tishukoff.feature.memory.api.MemoryManager
-import com.tishukoff.feature.profile.api.ProfileProvider
 import com.tishukoff.feature.agent.api.BranchInfo
 import com.tishukoff.feature.agent.api.ChatMessage
 import com.tishukoff.feature.agent.api.CompressionStats
@@ -15,11 +12,16 @@ import com.tishukoff.feature.agent.api.ContextStrategyType
 import com.tishukoff.feature.agent.api.LlmSettings
 import com.tishukoff.feature.agent.api.ResponseMetadata
 import com.tishukoff.feature.agent.api.TokenStats
+import com.tishukoff.feature.agent.api.ToolCallEntry
 import com.tishukoff.feature.agent.impl.strategy.BranchingStrategy
 import com.tishukoff.feature.agent.impl.strategy.ContextStrategy
 import com.tishukoff.feature.agent.impl.strategy.SlidingWindowStrategy
 import com.tishukoff.feature.agent.impl.strategy.StickyFactsStrategy
 import com.tishukoff.feature.agent.impl.strategy.SummarizationStrategy
+import com.tishukoff.feature.invariant.api.InvariantProvider
+import com.tishukoff.feature.mcp.api.McpToolRouter
+import com.tishukoff.feature.memory.api.MemoryManager
+import com.tishukoff.feature.profile.api.ProfileProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -46,6 +48,7 @@ internal class ClaudeAgent(
     private val memoryManager: MemoryManager,
     private val profileProvider: ProfileProvider,
     private val invariantProvider: InvariantProvider,
+    private val toolRouter: McpToolRouter?,
 ) : Agent {
 
     private val client = OkHttpClient.Builder()
@@ -112,13 +115,14 @@ internal class ClaudeAgent(
     override suspend fun processRequest(): ChatMessage {
         val chatId = _currentChatId.value ?: error("No active chat")
         return try {
-            val (text, metadata) = callApi(chatId)
+            val (text, metadata, toolCalls) = callApi(chatId)
             updateTokenStats(metadata)
             val metadataText = formatMetadata(metadata)
             val response = ChatMessage(
                 text = text,
                 isUser = false,
                 metadataText = metadataText,
+                toolCalls = toolCalls,
             )
             chatHistoryStorage.insert(chatId, response.toRecord())
 
@@ -176,7 +180,13 @@ internal class ClaudeAgent(
         return chatId
     }
 
-    private suspend fun callApi(chatId: Long): Pair<String, ResponseMetadata> {
+    private data class ApiResult(
+        val text: String,
+        val metadata: ResponseMetadata,
+        val toolCalls: List<ToolCallEntry>,
+    )
+
+    private suspend fun callApi(chatId: Long): ApiResult {
         return withContext(Dispatchers.IO) {
             val settings = currentSettings
             val model = settings.model
@@ -243,7 +253,14 @@ internal class ClaudeAgent(
                 }
             }
 
-            val messagesArray = JSONArray().apply {
+            val toolsArray = buildToolsArray()
+            val collectedToolCalls = mutableListOf<ToolCallEntry>()
+            var totalInputTokens = 0
+            var totalOutputTokens = 0
+            var totalElapsed = 0L
+
+            // Build initial messages
+            val conversationMessages = JSONArray().apply {
                 for (msg in messagesToSend) {
                     put(JSONObject().apply {
                         put("role", if (msg.isUser) "user" else "assistant")
@@ -252,58 +269,162 @@ internal class ClaudeAgent(
                 }
             }
 
-            val jsonBody = JSONObject().apply {
-                put("model", model.apiId)
-                put("max_tokens", settings.maxTokens)
-                put("temperature", settings.temperature.toDouble())
-                if (systemPromptText.isNotBlank()) {
-                    put("system", systemPromptText)
+            var maxIterations = MAX_TOOL_ITERATIONS
+
+            while (true) {
+                val jsonBody = JSONObject().apply {
+                    put("model", model.apiId)
+                    put("max_tokens", settings.maxTokens)
+                    put("temperature", settings.temperature.toDouble())
+                    if (systemPromptText.isNotBlank()) {
+                        put("system", systemPromptText)
+                    }
+                    put("messages", conversationMessages)
+                    if (settings.stopSequences.isNotEmpty()) {
+                        put("stop_sequences", JSONArray(settings.stopSequences))
+                    }
+                    if (toolsArray != null) {
+                        put("tools", toolsArray)
+                    }
                 }
-                put("messages", messagesArray)
-                if (settings.stopSequences.isNotEmpty()) {
-                    put("stop_sequences", JSONArray(settings.stopSequences))
+
+                val request = Request.Builder()
+                    .url("https://api.anthropic.com/v1/messages")
+                    .addHeader("x-api-key", apiKey)
+                    .addHeader("anthropic-version", "2023-06-01")
+                    .addHeader("content-type", "application/json")
+                    .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
+                    .build()
+
+                val startTime = System.currentTimeMillis()
+                val response = client.newCall(request).execute()
+                val elapsed = System.currentTimeMillis() - startTime
+                totalElapsed += elapsed
+                val body = response.body?.string() ?: "Empty response"
+
+                if (!response.isSuccessful) {
+                    error("Error ${response.code}: $body")
+                }
+
+                val json = JSONObject(body)
+                val content = json.getJSONArray("content")
+                val stopReason = json.optString("stop_reason", "end_turn")
+                val usage = json.getJSONObject("usage")
+                totalInputTokens += usage.getInt("input_tokens")
+                totalOutputTokens += usage.getInt("output_tokens")
+
+                if (stopReason == "tool_use" && toolRouter != null) {
+                    // Add assistant message with full content (text + tool_use blocks)
+                    conversationMessages.put(JSONObject().apply {
+                        put("role", "assistant")
+                        put("content", content)
+                    })
+
+                    // Process each tool_use block
+                    val toolResultsContent = JSONArray()
+                    for (i in 0 until content.length()) {
+                        val block = content.getJSONObject(i)
+                        if (block.getString("type") == "tool_use") {
+                            val toolUseId = block.getString("id")
+                            val toolName = block.getString("name")
+                            val toolInput = block.getJSONObject("input")
+
+                            val arguments = mutableMapOf<String, Any?>()
+                            for (key in toolInput.keys()) {
+                                arguments[key] = toolInput.get(key)
+                            }
+
+                            val toolResult = try {
+                                toolRouter.callTool(toolName, arguments)
+                            } catch (e: Exception) {
+                                "Error calling tool '$toolName': ${e.message}"
+                            }
+
+                            val serverName = toolRouter.getServerNameForTool(toolName)
+
+                            collectedToolCalls.add(
+                                ToolCallEntry(
+                                    toolName = toolName,
+                                    serverName = serverName,
+                                    arguments = arguments.mapValues { it.value?.toString().orEmpty() },
+                                    result = toolResult,
+                                )
+                            )
+
+                            toolResultsContent.put(JSONObject().apply {
+                                put("type", "tool_result")
+                                put("tool_use_id", toolUseId)
+                                put("content", toolResult)
+                            })
+                        }
+                    }
+
+                    // Add user message with tool results
+                    conversationMessages.put(JSONObject().apply {
+                        put("role", "user")
+                        put("content", toolResultsContent)
+                    })
+
+                    maxIterations--
+                    if (maxIterations <= 0) {
+                        break
+                    }
+                } else {
+                    // Final response — extract text
+                    val text = buildString {
+                        for (i in 0 until content.length()) {
+                            val block = content.getJSONObject(i)
+                            if (block.getString("type") == "text") {
+                                if (isNotEmpty()) append("\n")
+                                append(block.getString("text"))
+                            }
+                        }
+                    }.ifEmpty { "Empty response from Claude" }
+
+                    val cost = totalInputTokens * model.inputPricePerMillion / 1_000_000 +
+                            totalOutputTokens * model.outputPricePerMillion / 1_000_000
+
+                    val metadata = ResponseMetadata(
+                        modelId = model.apiId,
+                        inputTokens = totalInputTokens,
+                        outputTokens = totalOutputTokens,
+                        responseTimeMs = totalElapsed,
+                        costUsd = cost,
+                    )
+
+                    return@withContext ApiResult(text, metadata, collectedToolCalls)
                 }
             }
 
-            val request = Request.Builder()
-                .url("https://api.anthropic.com/v1/messages")
-                .addHeader("x-api-key", apiKey)
-                .addHeader("anthropic-version", "2023-06-01")
-                .addHeader("content-type", "application/json")
-                .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
-                .build()
+            // Fallback if max iterations exceeded
+            val cost = totalInputTokens * model.inputPricePerMillion / 1_000_000 +
+                    totalOutputTokens * model.outputPricePerMillion / 1_000_000
+            val metadata = ResponseMetadata(
+                modelId = model.apiId,
+                inputTokens = totalInputTokens,
+                outputTokens = totalOutputTokens,
+                responseTimeMs = totalElapsed,
+                costUsd = cost,
+            )
+            ApiResult(
+                "Reached maximum tool call iterations ($MAX_TOOL_ITERATIONS)",
+                metadata,
+                collectedToolCalls,
+            )
+        }
+    }
 
-            val startTime = System.currentTimeMillis()
-            val response = client.newCall(request).execute()
-            val elapsed = System.currentTimeMillis() - startTime
-            val body = response.body?.string() ?: "Empty response"
+    private suspend fun buildToolsArray(): JSONArray? {
+        val mcpTools = toolRouter?.getAllTools() ?: return null
+        if (mcpTools.isEmpty()) return null
 
-            if (response.isSuccessful) {
-                val json = JSONObject(body)
-                val content = json.getJSONArray("content")
-                val text = if (content.length() > 0) {
-                    content.getJSONObject(0).getString("text")
-                } else {
-                    "Empty response from Claude"
-                }
-
-                val usage = json.getJSONObject("usage")
-                val inputTokens = usage.getInt("input_tokens")
-                val outputTokens = usage.getInt("output_tokens")
-                val cost = inputTokens * model.inputPricePerMillion / 1_000_000 +
-                        outputTokens * model.outputPricePerMillion / 1_000_000
-
-                val metadata = ResponseMetadata(
-                    modelId = model.apiId,
-                    inputTokens = inputTokens,
-                    outputTokens = outputTokens,
-                    responseTimeMs = elapsed,
-                    costUsd = cost,
-                )
-
-                Pair(text, metadata)
-            } else {
-                error("Error ${response.code}: $body")
+        return JSONArray().apply {
+            for (tool in mcpTools) {
+                put(JSONObject().apply {
+                    put("name", tool.name)
+                    put("description", tool.description)
+                    put("input_schema", JSONObject(tool.inputSchemaJson))
+                })
             }
         }
     }
@@ -329,6 +450,10 @@ internal class ClaudeAgent(
         val stats = _tokenStats.value
         val contextPercent = String.format(Locale.US, "%.1f", stats.contextUsagePercent)
         return "${metadata.modelId} | in: ${metadata.inputTokens} out: ${metadata.outputTokens} | ${time}s | \$$cost | ctx: $contextPercent%"
+    }
+
+    private companion object {
+        const val MAX_TOOL_ITERATIONS = 10
     }
 }
 
