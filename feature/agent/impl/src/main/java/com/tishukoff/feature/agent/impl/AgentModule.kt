@@ -1,6 +1,7 @@
 package com.tishukoff.feature.agent.impl
 
 import com.tishukoff.feature.agent.api.Agent
+import com.tishukoff.feature.mcp.api.McpToolRouter
 import org.koin.core.qualifier.named
 import org.koin.dsl.module
 
@@ -16,6 +17,7 @@ val agentModule = module {
             memoryManager = get(),
             profileProvider = get(),
             invariantProvider = get(),
+            toolRouter = getOrNull<McpToolRouter>(),
         )
     }
 }

@@ -27,12 +27,13 @@ class McpViewModel(
         _serverUrl.value = url
     }
 
+    @Suppress("DEPRECATION")
     fun connect() {
         viewModelScope.launch {
             _uiState.value = McpUiState.Connecting
             mcpPreferences.saveUrl(_serverUrl.value)
             try {
-                val result = mcpClientWrapper.connectAndListTools(_serverUrl.value)
+                val result = mcpClientWrapper.connectToServer(_serverUrl.value)
                 _uiState.value = McpUiState.Connected(
                     serverName = result.serverName,
                     serverVersion = result.serverVersion,
@@ -97,14 +98,16 @@ class McpViewModel(
         }
     }
 
+    @Suppress("DEPRECATION")
     fun disconnect() {
-        mcpClientWrapper.disconnect()
+        mcpClientWrapper.disconnectAll()
         _uiState.value = McpUiState.Idle
     }
 
+    @Suppress("DEPRECATION")
     override fun onCleared() {
         super.onCleared()
-        mcpClientWrapper.disconnect()
+        mcpClientWrapper.disconnectAll()
     }
 
     private companion object {
