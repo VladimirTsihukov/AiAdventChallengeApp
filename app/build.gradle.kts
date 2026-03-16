@@ -51,6 +51,8 @@ dependencies {
     implementation(project(":feature:invariant:impl"))
     implementation(project(":feature:mcp:api"))
     implementation(project(":feature:mcp:impl"))
+    implementation(project(":feature:rag:api"))
+    implementation(project(":feature:rag:impl"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
