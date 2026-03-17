@@ -12,3 +12,4 @@ local.properties
 /mcp-server/scheduled_tasks.json
 /mcp-server/pipeline_output/
 /mcp-server-weather/.kotlin/
+/lessons/

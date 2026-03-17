@@ -3,8 +3,14 @@ package com.tishukoff.feature.rag.impl.presentation
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.tishukoff.feature.rag.impl.domain.model.BenchmarkQuestion
+import com.tishukoff.feature.rag.impl.domain.model.BenchmarkQuestionResult
+import com.tishukoff.feature.rag.impl.domain.model.BenchmarkResult
 import com.tishukoff.feature.rag.impl.domain.model.ChunkingStrategy
 import com.tishukoff.feature.rag.impl.domain.model.RagDocument
+import com.tishukoff.feature.rag.impl.domain.model.RagMode
+import com.tishukoff.feature.rag.impl.domain.model.benchmarkQuestions
+import com.tishukoff.feature.rag.impl.domain.model.toChunkingStrategy
 import com.tishukoff.feature.rag.impl.domain.repository.RagRepository
 import com.tishukoff.feature.rag.impl.domain.usecase.IndexDocumentsUseCase
 import com.tishukoff.feature.rag.impl.domain.usecase.SearchDocumentsUseCase
@@ -54,8 +60,10 @@ internal class RagViewModel(
             is RagIntent.UpdateInput -> _uiState.update { it.copy(input = intent.text) }
             is RagIntent.SendMessage -> sendMessage()
             is RagIntent.IndexDocuments -> indexDocuments()
-            is RagIntent.SwitchStrategy -> switchStrategy(intent.strategy)
+            is RagIntent.SwitchMode -> switchMode(intent.mode)
             is RagIntent.DismissError -> _uiState.update { it.copy(error = null) }
+            is RagIntent.RunBenchmark -> runBenchmark()
+            is RagIntent.DismissBenchmarkResult -> _uiState.update { it.copy(benchmarkResult = null) }
         }
     }
 
@@ -72,25 +80,28 @@ internal class RagViewModel(
         }
     }
 
-    private fun switchStrategy(strategy: ChunkingStrategy) {
-        _uiState.update { it.copy(currentStrategy = strategy) }
+    private fun switchMode(mode: RagMode) {
+        _uiState.update { it.copy(currentMode = mode) }
     }
 
-    private fun addMessage(message: RagChatMessage, strategy: ChunkingStrategy? = null) {
-        val targetStrategy = strategy ?: _uiState.value.currentStrategy
+    private fun addMessage(message: RagChatMessage, mode: RagMode? = null) {
+        val targetMode = mode ?: _uiState.value.currentMode
         _uiState.update {
-            when (targetStrategy) {
-                ChunkingStrategy.FIXED_SIZE -> it.copy(
+            when (targetMode) {
+                RagMode.FIXED_SIZE -> it.copy(
                     fixedSizeMessages = it.fixedSizeMessages + message,
                 )
-                ChunkingStrategy.STRUCTURAL -> it.copy(
+                RagMode.STRUCTURAL -> it.copy(
                     structuralMessages = it.structuralMessages + message,
+                )
+                RagMode.NO_RAG -> it.copy(
+                    noRagMessages = it.noRagMessages + message,
                 )
             }
         }
     }
 
-    private fun addMessageToBoth(message: RagChatMessage) {
+    private fun addMessageToRagModes(message: RagChatMessage) {
         _uiState.update {
             it.copy(
                 fixedSizeMessages = it.fixedSizeMessages + message,
@@ -134,7 +145,7 @@ internal class RagViewModel(
                 )
             }
 
-            addMessageToBoth(
+            addMessageToRagModes(
                 RagChatMessage(
                     text = "Индексация завершена!\n" +
                         "Fixed-size: $fixedCount чанков\n" +
@@ -149,63 +160,159 @@ internal class RagViewModel(
         val query = _uiState.value.input.trim()
         if (query.isBlank()) return
 
-        val strategy = _uiState.value.currentStrategy
+        val mode = _uiState.value.currentMode
 
         _uiState.update { it.copy(input = "", isLoading = true) }
         addMessage(RagChatMessage(text = query, isUser = true))
 
         viewModelScope.launch {
-            searchDocumentsUseCase(query, strategy)
-                .onSuccess { results ->
-                    if (results.isEmpty()) {
-                        addMessage(
-                            RagChatMessage(
-                                text = "Не найдено релевантных документов. Попробуйте сначала выполнить индексацию.",
-                                isUser = false,
-                            )
-                        )
-                        _uiState.update { it.copy(isLoading = false) }
-                        return@launch
-                    }
-
-                    val contextText = results.joinToString("\n\n---\n\n") { result ->
-                        "[Источник: ${result.chunk.metadata.source}, " +
-                            "Раздел: ${result.chunk.metadata.section}, " +
-                            "Релевантность: ${"%.2f".format(result.score)}]\n${result.chunk.text}"
-                    }
-
-                    val sources = results.map { result ->
-                        SourceInfo(
-                            fileName = result.chunk.metadata.source,
-                            section = result.chunk.metadata.section,
-                            score = result.score,
-                            chunkPreview = result.chunk.text.take(100) + "...",
-                        )
-                    }
-
-                    val answer = generateAnswer(query, contextText)
-
-                    addMessage(
-                        RagChatMessage(
-                            text = answer,
-                            isUser = false,
-                            sources = sources,
-                        )
-                    )
-                    _uiState.update { it.copy(isLoading = false) }
-                }
-                .onFailure { error ->
-                    _uiState.update {
-                        it.copy(
-                            isLoading = false,
-                            error = "Ошибка поиска: ${error.message}",
-                        )
-                    }
-                }
+            val answer = generateAnswerForMode(query, mode)
+            addMessage(answer)
+            _uiState.update { it.copy(isLoading = false) }
         }
     }
 
-    private suspend fun generateAnswer(query: String, context: String): String {
+    private suspend fun generateAnswerForMode(query: String, mode: RagMode): RagChatMessage {
+        val chunkingStrategy = mode.toChunkingStrategy()
+            ?: return generateNoRagAnswer(query)
+
+        return generateRagAnswer(query, chunkingStrategy)
+    }
+
+    private suspend fun generateRagAnswer(query: String, strategy: ChunkingStrategy): RagChatMessage {
+        val searchResult = searchDocumentsUseCase(query, strategy)
+
+        return searchResult.fold(
+            onSuccess = { results ->
+                if (results.isEmpty()) {
+                    return RagChatMessage(
+                        text = "Не найдено релевантных документов. Попробуйте сначала выполнить индексацию.",
+                        isUser = false,
+                    )
+                }
+
+                val contextText = results.joinToString("\n\n---\n\n") { result ->
+                    "[Источник: ${result.chunk.metadata.source}, " +
+                        "Раздел: ${result.chunk.metadata.section}, " +
+                        "Релевантность: ${"%.2f".format(result.score)}]\n${result.chunk.text}"
+                }
+
+                val sources = results.map { result ->
+                    SourceInfo(
+                        fileName = result.chunk.metadata.source,
+                        section = result.chunk.metadata.section,
+                        score = result.score,
+                        chunkPreview = result.chunk.text.take(100) + "...",
+                    )
+                }
+
+                val answer = generateRagLlmAnswer(query, contextText)
+                RagChatMessage(text = answer, isUser = false, sources = sources)
+            },
+            onFailure = { error ->
+                RagChatMessage(text = "Ошибка поиска: ${error.message}", isUser = false)
+            },
+        )
+    }
+
+    private suspend fun generateNoRagAnswer(query: String): RagChatMessage {
+        val answer = generateDirectLlmAnswer(query)
+        return RagChatMessage(text = answer, isUser = false)
+    }
+
+    private fun runBenchmark() {
+        val mode = _uiState.value.currentMode
+
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(isBenchmarkRunning = true, benchmarkResult = null, benchmarkProgress = "")
+            }
+
+            val results = mutableListOf<BenchmarkQuestionResult>()
+
+            for ((index, bq) in benchmarkQuestions.withIndex()) {
+                _uiState.update {
+                    it.copy(benchmarkProgress = "Вопрос ${index + 1}/${benchmarkQuestions.size}")
+                }
+
+                addMessage(RagChatMessage(text = bq.question, isUser = true), mode)
+
+                val answerMessage = generateAnswerForMode(bq.question, mode)
+                addMessage(answerMessage, mode)
+
+                val result = evaluateAnswer(bq, answerMessage.text)
+                results.add(result)
+            }
+
+            val benchmarkResult = BenchmarkResult(results)
+
+            val summaryText = buildBenchmarkSummary(benchmarkResult)
+            addMessage(RagChatMessage(text = summaryText, isUser = false), mode)
+
+            _uiState.update {
+                it.copy(
+                    isBenchmarkRunning = false,
+                    benchmarkProgress = "",
+                    benchmarkResult = benchmarkResult,
+                )
+            }
+        }
+    }
+
+    private fun evaluateAnswer(question: BenchmarkQuestion, answer: String): BenchmarkQuestionResult {
+        val lowerAnswer = answer.lowercase()
+        val foundKeywords = question.expectedKeywords.filter { keyword ->
+            lowerAnswer.contains(keyword.lowercase())
+        }
+        val passed = foundKeywords.isNotEmpty()
+
+        return BenchmarkQuestionResult(
+            question = question.question,
+            answer = answer,
+            expectedKeywords = question.expectedKeywords,
+            foundKeywords = foundKeywords,
+            passed = passed,
+        )
+    }
+
+    private fun buildBenchmarkSummary(result: BenchmarkResult): String {
+        return buildString {
+            appendLine("=== Результат бенчмарка ===")
+            appendLine("Пройдено: ${result.passedCount}/${result.totalCount}")
+            appendLine()
+            result.results.forEachIndexed { index, qr ->
+                val status = if (qr.passed) "PASS" else "FAIL"
+                appendLine("${index + 1}. [$status] ${qr.question}")
+                if (!qr.passed) {
+                    appendLine("   Ожидалось: ${qr.expectedKeywords.joinToString(", ")}")
+                }
+            }
+        }
+    }
+
+    private suspend fun generateRagLlmAnswer(query: String, context: String): String {
+        return callAnthropicApi(
+            buildString {
+                append("Ты — помощник, который отвечает на вопросы строго на основе предоставленного контекста.\n")
+                append("Если ответа нет в контексте, скажи об этом.\n")
+                append("Ссылайся на источники в ответе.\n\n")
+                append("Контекст:\n$context\n\n")
+                append("Вопрос: $query")
+            }
+        )
+    }
+
+    private suspend fun generateDirectLlmAnswer(query: String): String {
+        return callAnthropicApi(
+            buildString {
+                append("Ты — помощник, который отвечает на вопросы.\n")
+                append("Отвечай кратко и по существу.\n\n")
+                append("Вопрос: $query")
+            }
+        )
+    }
+
+    private suspend fun callAnthropicApi(userMessage: String): String {
         return try {
             val requestBody = buildJsonObject {
                 put("model", "claude-sonnet-4-20250514")
@@ -213,13 +320,7 @@ internal class RagViewModel(
                 put("messages", buildJsonArray {
                     add(buildJsonObject {
                         put("role", "user")
-                        put("content", buildString {
-                            append("Ты — помощник, который отвечает на вопросы строго на основе предоставленного контекста.\n")
-                            append("Если ответа нет в контексте, скажи об этом.\n")
-                            append("Ссылайся на источники в ответе.\n\n")
-                            append("Контекст:\n$context\n\n")
-                            append("Вопрос: $query")
-                        })
+                        put("content", userMessage)
                     })
                 })
             }.toString().toRequestBody("application/json".toMediaType())

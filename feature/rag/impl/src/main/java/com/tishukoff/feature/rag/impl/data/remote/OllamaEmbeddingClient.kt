@@ -16,7 +16,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.TimeUnit
 
 internal class OllamaEmbeddingClient(
-    private val baseUrl: String = "http://192.168.100.11:11434",
+    private val baseUrl: String = "http://192.168.100.3:11434",
     private val model: String = "nomic-embed-text",
 ) {
 
