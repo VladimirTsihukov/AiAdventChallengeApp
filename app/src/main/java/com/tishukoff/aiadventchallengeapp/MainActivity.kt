@@ -51,6 +51,8 @@ import com.tishukoff.feature.mcp.impl.presentation.orchestration.ui.Orchestratio
 import com.tishukoff.feature.mcp.impl.presentation.pipeline.ui.PipelineScreen
 import com.tishukoff.feature.mcp.impl.presentation.ui.McpScreen
 import com.tishukoff.feature.mcp.impl.presentation.scheduler.ui.SchedulerScreen
+import com.tishukoff.feature.rag.api.RagRoute
+import com.tishukoff.feature.rag.impl.presentation.ui.RagChatScreen
 import com.tishukoff.feature.setting.api.SettingRoute
 import com.tishukoff.feature.setting.impl.presentation.ui.SettingScreen
 import kotlinx.coroutines.launch
@@ -96,6 +98,9 @@ fun AppNavigation() {
                     },
                     onNavigateToMcp = dropUnlessResumed {
                         backStack.add(McpRoute)
+                    },
+                    onNavigateToRag = dropUnlessResumed {
+                        backStack.add(RagRoute)
                     },
                 )
             }
@@ -172,6 +177,14 @@ fun AppNavigation() {
                     },
                 )
             }
+
+            entry<RagRoute> {
+                RagChatScreen(
+                    onBack = dropUnlessResumed {
+                        backStack.removeLastOrNull()
+                    },
+                )
+            }
         },
     )
 }
@@ -184,6 +197,7 @@ fun ChatScreenWithDrawer(
     onNavigateToProfile: () -> Unit,
     onNavigateToInvariants: () -> Unit,
     onNavigateToMcp: () -> Unit,
+    onNavigateToRag: () -> Unit,
     viewModel: ChatViewModel = koinViewModel(),
 ) {
     val state by viewModel.uiState.collectAsState()
@@ -212,6 +226,10 @@ fun ChatScreenWithDrawer(
                     onMcpClick = {
                         scope.launch { drawerState.close() }
                         onNavigateToMcp()
+                    },
+                    onRagClick = {
+                        scope.launch { drawerState.close() }
+                        onNavigateToRag()
                     },
                     onChatSelect = { chatId ->
                         viewModel.handleIntent(ChatIntent.SelectChat(chatId))
