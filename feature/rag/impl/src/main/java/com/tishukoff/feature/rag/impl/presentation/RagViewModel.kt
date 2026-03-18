@@ -9,10 +9,15 @@ import com.tishukoff.feature.rag.impl.domain.model.BenchmarkResult
 import com.tishukoff.feature.rag.impl.domain.model.ChunkingStrategy
 import com.tishukoff.feature.rag.impl.domain.model.RagDocument
 import com.tishukoff.feature.rag.impl.domain.model.RagMode
+import com.tishukoff.feature.rag.impl.domain.model.RagSearchConfig
 import com.tishukoff.feature.rag.impl.domain.model.benchmarkQuestions
+import com.tishukoff.feature.rag.impl.domain.model.isReranked
 import com.tishukoff.feature.rag.impl.domain.model.toChunkingStrategy
+import com.tishukoff.feature.rag.impl.domain.repository.LlmClient
 import com.tishukoff.feature.rag.impl.domain.repository.RagRepository
 import com.tishukoff.feature.rag.impl.domain.usecase.IndexDocumentsUseCase
+import com.tishukoff.feature.rag.impl.domain.usecase.RerankChunksUseCase
+import com.tishukoff.feature.rag.impl.domain.usecase.RewriteQueryUseCase
 import com.tishukoff.feature.rag.impl.domain.usecase.SearchDocumentsUseCase
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -39,6 +44,9 @@ internal class RagViewModel(
     private val searchDocumentsUseCase: SearchDocumentsUseCase,
     private val anthropicApiKey: String,
     private val ragRepository: RagRepository,
+    private val llmClient: LlmClient,
+    private val rewriteQueryUseCase: RewriteQueryUseCase,
+    private val rerankChunksUseCase: RerankChunksUseCase,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(RagUiState())
@@ -64,6 +72,9 @@ internal class RagViewModel(
             is RagIntent.DismissError -> _uiState.update { it.copy(error = null) }
             is RagIntent.RunBenchmark -> runBenchmark()
             is RagIntent.DismissBenchmarkResult -> _uiState.update { it.copy(benchmarkResult = null) }
+            is RagIntent.UpdateSimilarityThreshold -> _uiState.update { it.copy(similarityThreshold = intent.value) }
+            is RagIntent.UpdateInitialTopK -> _uiState.update { it.copy(initialTopK = intent.value) }
+            is RagIntent.UpdateFinalTopK -> _uiState.update { it.copy(finalTopK = intent.value) }
         }
     }
 
@@ -97,6 +108,12 @@ internal class RagViewModel(
                 RagMode.NO_RAG -> it.copy(
                     noRagMessages = it.noRagMessages + message,
                 )
+                RagMode.FIXED_RERANKED -> it.copy(
+                    fixedRerankedMessages = it.fixedRerankedMessages + message,
+                )
+                RagMode.STRUCTURAL_RERANKED -> it.copy(
+                    structuralRerankedMessages = it.structuralRerankedMessages + message,
+                )
             }
         }
     }
@@ -106,6 +123,8 @@ internal class RagViewModel(
             it.copy(
                 fixedSizeMessages = it.fixedSizeMessages + message,
                 structuralMessages = it.structuralMessages + message,
+                fixedRerankedMessages = it.fixedRerankedMessages + message,
+                structuralRerankedMessages = it.structuralRerankedMessages + message,
             )
         }
     }
@@ -176,7 +195,77 @@ internal class RagViewModel(
         val chunkingStrategy = mode.toChunkingStrategy()
             ?: return generateNoRagAnswer(query)
 
+        if (mode.isReranked) {
+            val state = _uiState.value
+            val config = RagSearchConfig(
+                initialTopK = state.initialTopK,
+                finalTopK = state.finalTopK,
+                similarityThreshold = state.similarityThreshold,
+            )
+            return generateRerankedRagAnswer(query, chunkingStrategy, config)
+        }
+
         return generateRagAnswer(query, chunkingStrategy)
+    }
+
+    private suspend fun generateRerankedRagAnswer(
+        query: String,
+        strategy: ChunkingStrategy,
+        config: RagSearchConfig,
+    ): RagChatMessage {
+        val rewrittenQuery = rewriteQueryUseCase(query).getOrDefault(query)
+
+        val searchResult = searchDocumentsUseCase(rewrittenQuery, strategy, config.initialTopK)
+
+        return searchResult.fold(
+            onSuccess = { results ->
+                if (results.isEmpty()) {
+                    return RagChatMessage(
+                        text = "Не найдено релевантных документов. Попробуйте сначала выполнить индексацию.",
+                        isUser = false,
+                    )
+                }
+
+                val filtered = results.filter { it.score >= config.similarityThreshold }
+                if (filtered.isEmpty()) {
+                    return RagChatMessage(
+                        text = "Все результаты отфильтрованы по порогу релевантности " +
+                            "(${config.similarityThreshold}). Попробуйте снизить порог.",
+                        isUser = false,
+                    )
+                }
+
+                val reranked = rerankChunksUseCase(rewrittenQuery, filtered, config.finalTopK)
+                    .getOrDefault(filtered.take(config.finalTopK))
+
+                val contextText = reranked.joinToString("\n\n---\n\n") { result ->
+                    "[Источник: ${result.chunk.metadata.source}, " +
+                        "Раздел: ${result.chunk.metadata.section}, " +
+                        "Релевантность: ${"%.2f".format(result.score)}]\n${result.chunk.text}"
+                }
+
+                val sources = reranked.map { result ->
+                    SourceInfo(
+                        fileName = result.chunk.metadata.source,
+                        section = "[reranked] ${result.chunk.metadata.section}",
+                        score = result.score,
+                        chunkPreview = result.chunk.text.take(100) + "...",
+                    )
+                }
+
+                val header = if (rewrittenQuery != query) {
+                    "Переписанный запрос: $rewrittenQuery\n\n"
+                } else {
+                    ""
+                }
+
+                val answer = generateRagLlmAnswer(rewrittenQuery, contextText)
+                RagChatMessage(text = header + answer, isUser = false, sources = sources)
+            },
+            onFailure = { error ->
+                RagChatMessage(text = "Ошибка поиска: ${error.message}", isUser = false)
+            },
+        )
     }
 
     private suspend fun generateRagAnswer(query: String, strategy: ChunkingStrategy): RagChatMessage {
