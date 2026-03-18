@@ -20,6 +20,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -29,7 +31,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -38,6 +39,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Snackbar
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -47,6 +50,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,11 +59,12 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.tishukoff.feature.rag.impl.domain.model.ChunkingStrategy
+import com.tishukoff.feature.rag.impl.domain.model.RagMode
 import com.tishukoff.feature.rag.impl.presentation.RagChatMessage
 import com.tishukoff.feature.rag.impl.presentation.RagIntent
 import com.tishukoff.feature.rag.impl.presentation.RagViewModel
 import com.tishukoff.feature.rag.impl.presentation.SourceInfo
+import kotlinx.coroutines.launch
 import org.koin.androidx.compose.koinViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -69,11 +74,18 @@ fun RagChatScreen(
 ) {
     val viewModel: RagViewModel = koinViewModel()
     val state by viewModel.uiState.collectAsState()
-    val listState = rememberLazyListState()
+    val modes = RagMode.entries
+    val pagerState = rememberPagerState(pageCount = { modes.size })
+    val coroutineScope = rememberCoroutineScope()
 
-    LaunchedEffect(state.messages.size) {
-        if (state.messages.isNotEmpty()) {
-            listState.animateScrollToItem(state.messages.lastIndex)
+    LaunchedEffect(pagerState.currentPage) {
+        viewModel.handleIntent(RagIntent.SwitchMode(modes[pagerState.currentPage]))
+    }
+
+    LaunchedEffect(state.currentMode) {
+        val targetPage = modes.indexOf(state.currentMode)
+        if (pagerState.currentPage != targetPage) {
+            pagerState.animateScrollToPage(targetPage)
         }
     }
 
@@ -98,74 +110,43 @@ fun RagChatScreen(
                 .padding(innerPadding)
                 .imePadding(),
         ) {
-            StrategySelector(
-                currentStrategy = state.currentStrategy,
-                fixedCount = state.fixedSizeChunkCount,
-                structuralCount = state.structuralChunkCount,
-                onStrategySelect = { viewModel.handleIntent(RagIntent.SwitchStrategy(it)) },
-            )
+            TabRow(selectedTabIndex = pagerState.currentPage) {
+                modes.forEachIndexed { index, mode ->
+                    val label = when (mode) {
+                        RagMode.FIXED_SIZE -> "Fixed (${state.fixedSizeChunkCount})"
+                        RagMode.STRUCTURAL -> "Structural (${state.structuralChunkCount})"
+                        RagMode.NO_RAG -> "No RAG"
+                    }
+                    Tab(
+                        selected = pagerState.currentPage == index,
+                        onClick = {
+                            coroutineScope.launch { pagerState.animateScrollToPage(index) }
+                        },
+                        text = { Text(label, maxLines = 1) },
+                    )
+                }
+            }
 
             if (state.isIndexing) {
                 IndexingProgress(progress = state.indexingProgress)
             }
 
-            LazyColumn(
-                state = listState,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                contentPadding = PaddingValues(vertical = 12.dp),
-            ) {
-                if (state.messages.isEmpty() && !state.isLoading) {
-                    item {
-                        Box(
-                            modifier = Modifier.fillParentMaxSize(),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(
-                                    text = "RAG Document Search",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                    text = "Нажмите \"Индексировать\" для начала,\nзатем задайте вопрос по документам",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                                )
-                            }
-                        }
-                    }
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.weight(1f),
+            ) { page ->
+                val pageMode = modes[page]
+                val messages = when (pageMode) {
+                    RagMode.FIXED_SIZE -> state.fixedSizeMessages
+                    RagMode.STRUCTURAL -> state.structuralMessages
+                    RagMode.NO_RAG -> state.noRagMessages
                 }
-
-                items(state.messages) { message ->
-                    RagMessageBubble(message = message)
-                }
-
-                if (state.isLoading) {
-                    item {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.Start,
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                            ) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(20.dp),
-                                    strokeWidth = 2.dp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
-                    }
-                }
+                RagChatPage(
+                    messages = messages,
+                    isLoading = state.isLoading && state.currentMode == pageMode,
+                    isBenchmarkRunning = state.isBenchmarkRunning && state.currentMode == pageMode,
+                    benchmarkProgress = state.benchmarkProgress,
+                )
             }
 
             state.error?.let { error ->
@@ -185,37 +166,98 @@ fun RagChatScreen(
                 input = state.input,
                 isLoading = state.isLoading,
                 isIndexing = state.isIndexing,
+                isBenchmarkRunning = state.isBenchmarkRunning,
+                showIndexButton = state.currentMode != RagMode.NO_RAG,
                 onInputChange = { viewModel.handleIntent(RagIntent.UpdateInput(it)) },
                 onSend = { viewModel.handleIntent(RagIntent.SendMessage) },
                 onIndex = { viewModel.handleIntent(RagIntent.IndexDocuments) },
+                onBenchmark = { viewModel.handleIntent(RagIntent.RunBenchmark) },
             )
         }
     }
 }
 
 @Composable
-private fun StrategySelector(
-    currentStrategy: ChunkingStrategy,
-    fixedCount: Int,
-    structuralCount: Int,
-    onStrategySelect: (ChunkingStrategy) -> Unit,
+private fun RagChatPage(
+    messages: List<RagChatMessage>,
+    isLoading: Boolean,
+    isBenchmarkRunning: Boolean,
+    benchmarkProgress: String,
 ) {
-    Row(
+    val listState = rememberLazyListState()
+
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) {
+            listState.animateScrollToItem(messages.lastIndex)
+        }
+    }
+
+    LazyColumn(
+        state = listState,
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+            .fillMaxSize()
+            .padding(horizontal = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(vertical = 12.dp),
     ) {
-        FilterChip(
-            selected = currentStrategy == ChunkingStrategy.FIXED_SIZE,
-            onClick = { onStrategySelect(ChunkingStrategy.FIXED_SIZE) },
-            label = { Text("Fixed ($fixedCount)") },
-        )
-        FilterChip(
-            selected = currentStrategy == ChunkingStrategy.STRUCTURAL,
-            onClick = { onStrategySelect(ChunkingStrategy.STRUCTURAL) },
-            label = { Text("Structural ($structuralCount)") },
-        )
+        if (messages.isEmpty() && !isLoading && !isBenchmarkRunning) {
+            item {
+                Box(
+                    modifier = Modifier.fillParentMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "RAG Document Search",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Нажмите \"Индексировать\" для начала,\nзатем задайте вопрос по документам",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        )
+                    }
+                }
+            }
+        }
+
+        items(messages) { message ->
+            RagMessageBubble(message = message)
+        }
+
+        if (isLoading || isBenchmarkRunning) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Start,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            if (isBenchmarkRunning && benchmarkProgress.isNotEmpty()) {
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = benchmarkProgress,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -344,27 +386,53 @@ private fun BottomInputBar(
     input: String,
     isLoading: Boolean,
     isIndexing: Boolean,
+    isBenchmarkRunning: Boolean,
+    showIndexButton: Boolean,
     onInputChange: (String) -> Unit,
     onSend: () -> Unit,
     onIndex: () -> Unit,
+    onBenchmark: () -> Unit,
 ) {
+    val isBusy = isLoading || isIndexing || isBenchmarkRunning
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 8.dp),
     ) {
-        Button(
-            onClick = onIndex,
-            enabled = !isIndexing && !isLoading,
+        Row(
             modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.tertiary,
-            ),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(
-                text = if (isIndexing) "Индексация..." else "Индексировать документы",
-                color = MaterialTheme.colorScheme.onTertiary,
-            )
+            if (showIndexButton) {
+                Button(
+                    onClick = onIndex,
+                    enabled = !isBusy,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.tertiary,
+                    ),
+                ) {
+                    Text(
+                        text = if (isIndexing) "Индексация..." else "Индексировать",
+                        color = MaterialTheme.colorScheme.onTertiary,
+                    )
+                }
+            }
+
+            Button(
+                onClick = onBenchmark,
+                enabled = !isBusy,
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.secondary,
+                ),
+            ) {
+                Text(
+                    text = if (isBenchmarkRunning) "Тест..." else "Тест (10)",
+                    color = MaterialTheme.colorScheme.onSecondary,
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(4.dp))
@@ -374,12 +442,12 @@ private fun BottomInputBar(
             onValueChange = onInputChange,
             placeholder = { Text("Задайте вопрос по документам...") },
             modifier = Modifier.fillMaxWidth(),
-            enabled = !isLoading && !isIndexing,
+            enabled = !isBusy,
             trailingIcon = {
                 if (!isLoading) {
                     IconButton(
                         onClick = onSend,
-                        enabled = input.isNotBlank(),
+                        enabled = input.isNotBlank() && !isBusy,
                         colors = IconButtonDefaults.iconButtonColors(
                             contentColor = MaterialTheme.colorScheme.primary,
                         ),
