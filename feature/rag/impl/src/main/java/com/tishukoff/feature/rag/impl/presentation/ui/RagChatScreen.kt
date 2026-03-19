@@ -39,8 +39,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Snackbar
+import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -60,10 +61,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.tishukoff.feature.rag.impl.domain.model.RagMode
+import com.tishukoff.feature.rag.impl.domain.model.isReranked
 import com.tishukoff.feature.rag.impl.presentation.RagChatMessage
 import com.tishukoff.feature.rag.impl.presentation.RagIntent
+import com.tishukoff.feature.rag.impl.presentation.RagUiState
 import com.tishukoff.feature.rag.impl.presentation.RagViewModel
 import com.tishukoff.feature.rag.impl.presentation.SourceInfo
+import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 import org.koin.androidx.compose.koinViewModel
 
@@ -110,12 +114,17 @@ fun RagChatScreen(
                 .padding(innerPadding)
                 .imePadding(),
         ) {
-            TabRow(selectedTabIndex = pagerState.currentPage) {
+            ScrollableTabRow(
+                selectedTabIndex = pagerState.currentPage,
+                edgePadding = 4.dp,
+            ) {
                 modes.forEachIndexed { index, mode ->
                     val label = when (mode) {
                         RagMode.FIXED_SIZE -> "Fixed (${state.fixedSizeChunkCount})"
                         RagMode.STRUCTURAL -> "Structural (${state.structuralChunkCount})"
                         RagMode.NO_RAG -> "No RAG"
+                        RagMode.FIXED_RERANKED -> "Fixed+RR"
+                        RagMode.STRUCTURAL_RERANKED -> "Struct+RR"
                     }
                     Tab(
                         selected = pagerState.currentPage == index,
@@ -131,6 +140,13 @@ fun RagChatScreen(
                 IndexingProgress(progress = state.indexingProgress)
             }
 
+            if (state.currentMode.isReranked) {
+                RerankedSettingsPanel(
+                    state = state,
+                    onIntent = { viewModel.handleIntent(it) },
+                )
+            }
+
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier.weight(1f),
@@ -140,6 +156,8 @@ fun RagChatScreen(
                     RagMode.FIXED_SIZE -> state.fixedSizeMessages
                     RagMode.STRUCTURAL -> state.structuralMessages
                     RagMode.NO_RAG -> state.noRagMessages
+                    RagMode.FIXED_RERANKED -> state.fixedRerankedMessages
+                    RagMode.STRUCTURAL_RERANKED -> state.structuralRerankedMessages
                 }
                 RagChatPage(
                     messages = messages,
@@ -376,6 +394,63 @@ private fun SourcesList(sources: List<SourceInfo>) {
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RerankedSettingsPanel(
+    state: RagUiState,
+    onIntent: (RagIntent) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    ) {
+        Text(
+            text = "Threshold: ${"%.2f".format(state.similarityThreshold)}",
+            style = MaterialTheme.typography.labelSmall,
+        )
+        Slider(
+            value = state.similarityThreshold,
+            onValueChange = { onIntent(RagIntent.UpdateSimilarityThreshold(it)) },
+            valueRange = 0f..1f,
+            steps = 19,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Column {
+                Text(
+                    text = "Initial Top-K: ${state.initialTopK}",
+                    style = MaterialTheme.typography.labelSmall,
+                )
+                Slider(
+                    value = state.initialTopK.toFloat(),
+                    onValueChange = { onIntent(RagIntent.UpdateInitialTopK(it.roundToInt())) },
+                    valueRange = 5f..20f,
+                    steps = 14,
+                    modifier = Modifier.width(160.dp),
+                )
+            }
+            Column {
+                Text(
+                    text = "Final Top-K: ${state.finalTopK}",
+                    style = MaterialTheme.typography.labelSmall,
+                )
+                Slider(
+                    value = state.finalTopK.toFloat(),
+                    onValueChange = { onIntent(RagIntent.UpdateFinalTopK(it.roundToInt())) },
+                    valueRange = 1f..10f,
+                    steps = 8,
+                    modifier = Modifier.width(160.dp),
+                )
             }
         }
     }

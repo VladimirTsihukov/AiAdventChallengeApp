@@ -4,10 +4,14 @@ import androidx.room.Room
 import com.tishukoff.feature.rag.impl.data.chunking.FixedSizeChunker
 import com.tishukoff.feature.rag.impl.data.chunking.StructuralChunker
 import com.tishukoff.feature.rag.impl.data.local.RagDatabase
+import com.tishukoff.feature.rag.impl.data.remote.AnthropicLlmClient
 import com.tishukoff.feature.rag.impl.data.remote.OllamaEmbeddingClient
 import com.tishukoff.feature.rag.impl.data.repository.RagRepositoryImpl
+import com.tishukoff.feature.rag.impl.domain.repository.LlmClient
 import com.tishukoff.feature.rag.impl.domain.repository.RagRepository
 import com.tishukoff.feature.rag.impl.domain.usecase.IndexDocumentsUseCase
+import com.tishukoff.feature.rag.impl.domain.usecase.RerankChunksUseCase
+import com.tishukoff.feature.rag.impl.domain.usecase.RewriteQueryUseCase
 import com.tishukoff.feature.rag.impl.domain.usecase.SearchDocumentsUseCase
 import com.tishukoff.feature.rag.impl.presentation.RagViewModel
 import org.koin.core.module.dsl.viewModel
@@ -25,7 +29,10 @@ val ragModule = module {
     single { FixedSizeChunker() }
     single { StructuralChunker() }
     single<RagRepository> { RagRepositoryImpl(get(), get(), get(), get()) }
+    single<LlmClient> { AnthropicLlmClient(get(named("anthropicApiKey"))) }
     factory { IndexDocumentsUseCase(get()) }
     factory { SearchDocumentsUseCase(get()) }
-    viewModel { RagViewModel(get(), get(), get(), get(named("anthropicApiKey")), get()) }
+    factory { RewriteQueryUseCase(get()) }
+    factory { RerankChunksUseCase(get()) }
+    viewModel { RagViewModel(get(), get(), get(), get(named("anthropicApiKey")), get(), get(), get(), get()) }
 }
