@@ -38,6 +38,7 @@ internal data class RagChatMessage(
     val text: String,
     val isUser: Boolean,
     val sources: List<SourceInfo> = emptyList(),
+    val quotes: List<String> = emptyList(),
 )
 
 internal data class SourceInfo(

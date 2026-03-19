@@ -334,6 +334,11 @@ private fun RagMessageBubble(message: RagChatMessage) {
             Spacer(modifier = Modifier.height(4.dp))
             SourcesList(sources = message.sources)
         }
+
+        if (message.quotes.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(4.dp))
+            QuotesList(quotes = message.quotes)
+        }
     }
 }
 
@@ -392,6 +397,41 @@ private fun SourcesList(sources: List<SourceInfo>) {
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                             )
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun QuotesList(quotes: List<String>) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Column(modifier = Modifier.padding(start = 8.dp)) {
+        Text(
+            text = if (expanded) "Скрыть цитаты" else "Показать цитаты (${quotes.size})",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.tertiary,
+            modifier = Modifier
+                .clickable { expanded = !expanded }
+                .padding(4.dp),
+        )
+
+        AnimatedVisibility(visible = expanded) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                quotes.forEach { quote ->
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                        ),
+                    ) {
+                        Text(
+                            text = "\"$quote\"",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer,
+                            modifier = Modifier.padding(8.dp),
+                        )
                     }
                 }
             }

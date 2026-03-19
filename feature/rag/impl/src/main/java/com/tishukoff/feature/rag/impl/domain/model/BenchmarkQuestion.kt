@@ -22,6 +22,8 @@ data class BenchmarkQuestionResult(
     val expectedKeywords: List<String>,
     val foundKeywords: List<String>,
     val passed: Boolean,
+    val hasSources: Boolean = false,
+    val hasQuotes: Boolean = false,
 )
 
 /**
