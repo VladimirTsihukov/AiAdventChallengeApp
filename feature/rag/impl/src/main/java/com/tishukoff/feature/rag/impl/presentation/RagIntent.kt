@@ -13,4 +13,6 @@ internal sealed interface RagIntent {
     data class UpdateSimilarityThreshold(val value: Float) : RagIntent
     data class UpdateInitialTopK(val value: Int) : RagIntent
     data class UpdateFinalTopK(val value: Int) : RagIntent
+    data object ClearTaskState : RagIntent
+    data object RunScenarioBenchmark : RagIntent
 }
