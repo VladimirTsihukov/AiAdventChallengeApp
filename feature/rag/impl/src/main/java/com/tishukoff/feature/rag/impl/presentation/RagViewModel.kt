@@ -229,8 +229,8 @@ internal class RagViewModel(
                 val filtered = results.filter { it.score >= config.similarityThreshold }
                 if (filtered.isEmpty()) {
                     return RagChatMessage(
-                        text = "Все результаты отфильтрованы по порогу релевантности " +
-                            "(${config.similarityThreshold}). Попробуйте снизить порог.",
+                        text = "Недостаточно данных для точного ответа. " +
+                            "Пожалуйста, уточните вопрос или переформулируйте.",
                         isUser = false,
                     )
                 }
@@ -259,8 +259,14 @@ internal class RagViewModel(
                     ""
                 }
 
-                val answer = generateRagLlmAnswer(rewrittenQuery, contextText)
-                RagChatMessage(text = header + answer, isUser = false, sources = sources)
+                val rawAnswer = generateRagLlmAnswer(rewrittenQuery, contextText)
+                val parsed = parseLlmRagResponse(rawAnswer)
+                RagChatMessage(
+                    text = header + parsed.answer,
+                    isUser = false,
+                    sources = sources,
+                    quotes = parsed.quotes,
+                )
             },
             onFailure = { error ->
                 RagChatMessage(text = "Ошибка поиска: ${error.message}", isUser = false)
@@ -295,8 +301,14 @@ internal class RagViewModel(
                     )
                 }
 
-                val answer = generateRagLlmAnswer(query, contextText)
-                RagChatMessage(text = answer, isUser = false, sources = sources)
+                val rawAnswer = generateRagLlmAnswer(query, contextText)
+                val parsed = parseLlmRagResponse(rawAnswer)
+                RagChatMessage(
+                    text = parsed.answer,
+                    isUser = false,
+                    sources = sources,
+                    quotes = parsed.quotes,
+                )
             },
             onFailure = { error ->
                 RagChatMessage(text = "Ошибка поиска: ${error.message}", isUser = false)
@@ -329,7 +341,7 @@ internal class RagViewModel(
                 val answerMessage = generateAnswerForMode(bq.question, mode)
                 addMessage(answerMessage, mode)
 
-                val result = evaluateAnswer(bq, answerMessage.text)
+                val result = evaluateAnswer(bq, answerMessage)
                 results.add(result)
             }
 
@@ -348,8 +360,8 @@ internal class RagViewModel(
         }
     }
 
-    private fun evaluateAnswer(question: BenchmarkQuestion, answer: String): BenchmarkQuestionResult {
-        val lowerAnswer = answer.lowercase()
+    private fun evaluateAnswer(question: BenchmarkQuestion, message: RagChatMessage): BenchmarkQuestionResult {
+        val lowerAnswer = message.text.lowercase()
         val foundKeywords = question.expectedKeywords.filter { keyword ->
             lowerAnswer.contains(keyword.lowercase())
         }
@@ -357,17 +369,24 @@ internal class RagViewModel(
 
         return BenchmarkQuestionResult(
             question = question.question,
-            answer = answer,
+            answer = message.text,
             expectedKeywords = question.expectedKeywords,
             foundKeywords = foundKeywords,
             passed = passed,
+            hasSources = message.sources.isNotEmpty(),
+            hasQuotes = message.quotes.isNotEmpty(),
         )
     }
 
     private fun buildBenchmarkSummary(result: BenchmarkResult): String {
+        val sourcesCount = result.results.count { it.hasSources }
+        val quotesCount = result.results.count { it.hasQuotes }
+
         return buildString {
             appendLine("=== Результат бенчмарка ===")
             appendLine("Пройдено: ${result.passedCount}/${result.totalCount}")
+            appendLine("Источники: $sourcesCount/${result.totalCount}")
+            appendLine("Цитаты: $quotesCount/${result.totalCount}")
             appendLine()
             result.results.forEachIndexed { index, qr ->
                 val status = if (qr.passed) "PASS" else "FAIL"
@@ -379,12 +398,61 @@ internal class RagViewModel(
         }
     }
 
+    private data class LlmRagResponse(
+        val answer: String,
+        val sources: List<LlmSourceRef> = emptyList(),
+        val quotes: List<String> = emptyList(),
+    )
+
+    private data class LlmSourceRef(
+        val file: String,
+        val section: String,
+    )
+
+    private fun parseLlmRagResponse(raw: String): LlmRagResponse {
+        return try {
+            val trimmed = raw.trim().let { text ->
+                if (text.startsWith("```json")) {
+                    text.removePrefix("```json").removeSuffix("```").trim()
+                } else if (text.startsWith("```")) {
+                    text.removePrefix("```").removeSuffix("```").trim()
+                } else {
+                    text
+                }
+            }
+            val jsonObj = json.decodeFromString<JsonObject>(trimmed)
+            val answer = jsonObj["answer"]?.jsonPrimitive?.content ?: raw
+            val sources = jsonObj["sources"]?.jsonArray?.mapNotNull { element ->
+                val obj = element.jsonObject
+                val file = obj["file"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                val section = obj["section"]?.jsonPrimitive?.content ?: ""
+                LlmSourceRef(file = file, section = section)
+            } ?: emptyList()
+            val quotes = jsonObj["quotes"]?.jsonArray?.mapNotNull { element ->
+                element.jsonPrimitive.content.takeIf { it.isNotBlank() }
+            } ?: emptyList()
+            LlmRagResponse(answer = answer, sources = sources, quotes = quotes)
+        } catch (_: Exception) {
+            LlmRagResponse(answer = raw)
+        }
+    }
+
     private suspend fun generateRagLlmAnswer(query: String, context: String): String {
         return callAnthropicApi(
             buildString {
                 append("Ты — помощник, который отвечает на вопросы строго на основе предоставленного контекста.\n")
-                append("Если ответа нет в контексте, скажи об этом.\n")
-                append("Ссылайся на источники в ответе.\n\n")
+                append("Если контекст не содержит ответа на вопрос, верни JSON с answer: \"Я не могу ответить на этот вопрос на основе имеющихся данных.\"\n\n")
+                append("Ты ОБЯЗАН вернуть ответ строго в формате JSON (без markdown-обёртки):\n")
+                append("{\n")
+                append("  \"answer\": \"<текст ответа>\",\n")
+                append("  \"sources\": [{\"file\": \"<имя файла>\", \"section\": \"<раздел>\"}],\n")
+                append("  \"quotes\": [\"<дословная цитата из контекста>\"]\n")
+                append("}\n\n")
+                append("Правила:\n")
+                append("- answer: развёрнутый ответ на вопрос\n")
+                append("- sources: список источников из контекста (file и section берутся из заголовков чанков)\n")
+                append("- quotes: дословные фрагменты из контекста, подтверждающие ответ\n")
+                append("- Если ответа нет в контексте — answer содержит отказ, sources и quotes пустые\n\n")
                 append("Контекст:\n$context\n\n")
                 append("Вопрос: $query")
             }
