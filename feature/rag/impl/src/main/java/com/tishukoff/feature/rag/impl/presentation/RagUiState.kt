@@ -2,6 +2,7 @@ package com.tishukoff.feature.rag.impl.presentation
 
 import com.tishukoff.feature.rag.impl.domain.model.BenchmarkResult
 import com.tishukoff.feature.rag.impl.domain.model.RagMode
+import com.tishukoff.feature.rag.impl.domain.model.TaskState
 
 internal data class RagUiState(
     val fixedSizeMessages: List<RagChatMessage> = emptyList(),
@@ -9,6 +10,8 @@ internal data class RagUiState(
     val noRagMessages: List<RagChatMessage> = emptyList(),
     val fixedRerankedMessages: List<RagChatMessage> = emptyList(),
     val structuralRerankedMessages: List<RagChatMessage> = emptyList(),
+    val memoryRagMessages: List<RagChatMessage> = emptyList(),
+    val taskState: TaskState = TaskState(),
     val input: String = "",
     val isLoading: Boolean = false,
     val isIndexing: Boolean = false,
@@ -31,6 +34,7 @@ internal data class RagUiState(
             RagMode.NO_RAG -> noRagMessages
             RagMode.FIXED_RERANKED -> fixedRerankedMessages
             RagMode.STRUCTURAL_RERANKED -> structuralRerankedMessages
+            RagMode.MEMORY_RAG -> memoryRagMessages
         }
 }
 

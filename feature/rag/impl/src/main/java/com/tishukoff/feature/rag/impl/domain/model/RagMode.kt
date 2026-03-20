@@ -9,6 +9,7 @@ enum class RagMode(val displayName: String) {
     NO_RAG("No RAG"),
     FIXED_RERANKED("Fixed + Rerank"),
     STRUCTURAL_RERANKED("Structural + Rerank"),
+    MEMORY_RAG("RAG + Memory"),
 }
 
 /**
@@ -21,6 +22,7 @@ fun RagMode.toChunkingStrategy(): ChunkingStrategy? = when (this) {
     RagMode.NO_RAG -> null
     RagMode.FIXED_RERANKED -> ChunkingStrategy.FIXED_SIZE
     RagMode.STRUCTURAL_RERANKED -> ChunkingStrategy.STRUCTURAL
+    RagMode.MEMORY_RAG -> ChunkingStrategy.STRUCTURAL
 }
 
 /**

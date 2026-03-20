@@ -9,6 +9,7 @@ import com.tishukoff.feature.rag.impl.data.remote.OllamaEmbeddingClient
 import com.tishukoff.feature.rag.impl.data.repository.RagRepositoryImpl
 import com.tishukoff.feature.rag.impl.domain.repository.LlmClient
 import com.tishukoff.feature.rag.impl.domain.repository.RagRepository
+import com.tishukoff.feature.rag.impl.domain.usecase.ExtractTaskStateUseCase
 import com.tishukoff.feature.rag.impl.domain.usecase.IndexDocumentsUseCase
 import com.tishukoff.feature.rag.impl.domain.usecase.RerankChunksUseCase
 import com.tishukoff.feature.rag.impl.domain.usecase.RewriteQueryUseCase
@@ -34,5 +35,6 @@ val ragModule = module {
     factory { SearchDocumentsUseCase(get()) }
     factory { RewriteQueryUseCase(get()) }
     factory { RerankChunksUseCase(get()) }
-    viewModel { RagViewModel(get(), get(), get(), get(named("anthropicApiKey")), get(), get(), get(), get()) }
+    factory { ExtractTaskStateUseCase(get()) }
+    viewModel { RagViewModel(get(), get(), get(), get(named("anthropicApiKey")), get(), get(), get(), get(), get()) }
 }

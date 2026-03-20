@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -62,6 +63,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.tishukoff.feature.rag.impl.domain.model.RagMode
 import com.tishukoff.feature.rag.impl.domain.model.isReranked
+import com.tishukoff.feature.rag.impl.domain.model.TaskState
 import com.tishukoff.feature.rag.impl.presentation.RagChatMessage
 import com.tishukoff.feature.rag.impl.presentation.RagIntent
 import com.tishukoff.feature.rag.impl.presentation.RagUiState
@@ -125,6 +127,7 @@ fun RagChatScreen(
                         RagMode.NO_RAG -> "No RAG"
                         RagMode.FIXED_RERANKED -> "Fixed+RR"
                         RagMode.STRUCTURAL_RERANKED -> "Struct+RR"
+                        RagMode.MEMORY_RAG -> "RAG+Mem"
                     }
                     Tab(
                         selected = pagerState.currentPage == index,
@@ -147,6 +150,13 @@ fun RagChatScreen(
                 )
             }
 
+            if (state.currentMode == RagMode.MEMORY_RAG && !state.taskState.isEmpty) {
+                TaskStatePanel(
+                    taskState = state.taskState,
+                    onClear = { viewModel.handleIntent(RagIntent.ClearTaskState) },
+                )
+            }
+
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier.weight(1f),
@@ -158,6 +168,7 @@ fun RagChatScreen(
                     RagMode.NO_RAG -> state.noRagMessages
                     RagMode.FIXED_RERANKED -> state.fixedRerankedMessages
                     RagMode.STRUCTURAL_RERANKED -> state.structuralRerankedMessages
+                    RagMode.MEMORY_RAG -> state.memoryRagMessages
                 }
                 RagChatPage(
                     messages = messages,
@@ -186,10 +197,17 @@ fun RagChatScreen(
                 isIndexing = state.isIndexing,
                 isBenchmarkRunning = state.isBenchmarkRunning,
                 showIndexButton = state.currentMode != RagMode.NO_RAG,
+                isMemoryMode = state.currentMode == RagMode.MEMORY_RAG,
                 onInputChange = { viewModel.handleIntent(RagIntent.UpdateInput(it)) },
                 onSend = { viewModel.handleIntent(RagIntent.SendMessage) },
                 onIndex = { viewModel.handleIntent(RagIntent.IndexDocuments) },
-                onBenchmark = { viewModel.handleIntent(RagIntent.RunBenchmark) },
+                onBenchmark = {
+                    if (state.currentMode == RagMode.MEMORY_RAG) {
+                        viewModel.handleIntent(RagIntent.RunScenarioBenchmark)
+                    } else {
+                        viewModel.handleIntent(RagIntent.RunBenchmark)
+                    }
+                },
             )
         }
     }
@@ -440,6 +458,121 @@ private fun QuotesList(quotes: List<String>) {
 }
 
 @Composable
+private fun TaskStatePanel(
+    taskState: TaskState,
+    onClear: () -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (expanded) Modifier.fillMaxHeight(0.5f) else Modifier
+            )
+            .background(MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.3f))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = if (expanded) "Память задачи (свернуть)" else "Память задачи (развернуть)",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .clickable { expanded = !expanded }
+                    .weight(1f),
+            )
+            TextButton(onClick = onClear) {
+                Text("Сбросить", style = MaterialTheme.typography.labelSmall)
+            }
+        }
+
+        if (taskState.goal.isNotBlank() && !expanded) {
+            Text(
+                text = "Цель: ${taskState.goal}",
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+
+        AnimatedVisibility(
+            visible = expanded,
+            modifier = Modifier.weight(1f, fill = false),
+        ) {
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                if (taskState.goal.isNotBlank()) {
+                    item {
+                        Text(
+                            text = "Цель: ${taskState.goal}",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
+                if (taskState.clarifications.isNotEmpty()) {
+                    item {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Уточнения:",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                    items(taskState.clarifications.size) { index ->
+                        Text(
+                            text = "• ${taskState.clarifications[index]}",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+                if (taskState.constraints.isNotEmpty()) {
+                    item {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Ограничения:",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                    items(taskState.constraints.size) { index ->
+                        Text(
+                            text = "• ${taskState.constraints[index]}",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+                if (taskState.terms.isNotEmpty()) {
+                    item {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Термины:",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                    val termEntries = taskState.terms.entries.toList()
+                    items(termEntries.size) { index ->
+                        val (term, definition) = termEntries[index]
+                        Text(
+                            text = "• $term — $definition",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun RerankedSettingsPanel(
     state: RagUiState,
     onIntent: (RagIntent) -> Unit,
@@ -503,6 +636,7 @@ private fun BottomInputBar(
     isIndexing: Boolean,
     isBenchmarkRunning: Boolean,
     showIndexButton: Boolean,
+    isMemoryMode: Boolean,
     onInputChange: (String) -> Unit,
     onSend: () -> Unit,
     onIndex: () -> Unit,
@@ -544,7 +678,11 @@ private fun BottomInputBar(
                 ),
             ) {
                 Text(
-                    text = if (isBenchmarkRunning) "Тест..." else "Тест (10)",
+                    text = when {
+                    isBenchmarkRunning -> "Тест..."
+                    isMemoryMode -> "Сценарий"
+                    else -> "Тест (10)"
+                },
                     color = MaterialTheme.colorScheme.onSecondary,
                 )
             }
