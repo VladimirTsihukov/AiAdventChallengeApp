@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.HorizontalDivider
@@ -44,6 +45,7 @@ fun DrawerContent(
     onInvariantsClick: () -> Unit,
     onMcpClick: () -> Unit,
     onRagClick: () -> Unit = {},
+    onLocalLlmClick: () -> Unit = {},
     onChatSelect: (Long) -> Unit,
     onChatDelete: (Long) -> Unit,
     onNewChat: () -> Unit,
@@ -141,6 +143,24 @@ fun DrawerContent(
             Spacer(modifier = Modifier.width(16.dp))
             Text(
                 text = "RAG Search",
+                style = MaterialTheme.typography.bodyLarge,
+            )
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onLocalLlmClick)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Default.PlayArrow,
+                contentDescription = null,
+            )
+            Spacer(modifier = Modifier.width(16.dp))
+            Text(
+                text = "Local LLM",
                 style = MaterialTheme.typography.bodyLarge,
             )
         }
