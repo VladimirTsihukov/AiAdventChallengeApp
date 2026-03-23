@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -46,6 +47,7 @@ fun DrawerContent(
     onMcpClick: () -> Unit,
     onRagClick: () -> Unit = {},
     onLocalLlmClick: () -> Unit = {},
+    onTelegramBotClick: () -> Unit = {},
     onChatSelect: (Long) -> Unit,
     onChatDelete: (Long) -> Unit,
     onNewChat: () -> Unit,
@@ -161,6 +163,24 @@ fun DrawerContent(
             Spacer(modifier = Modifier.width(16.dp))
             Text(
                 text = "Local LLM",
+                style = MaterialTheme.typography.bodyLarge,
+            )
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onTelegramBotClick)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Default.Notifications,
+                contentDescription = null,
+            )
+            Spacer(modifier = Modifier.width(16.dp))
+            Text(
+                text = "Telegram Bot",
                 style = MaterialTheme.typography.bodyLarge,
             )
         }
