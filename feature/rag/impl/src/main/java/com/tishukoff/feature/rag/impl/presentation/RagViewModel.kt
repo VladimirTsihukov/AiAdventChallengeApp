@@ -6,15 +6,19 @@ import androidx.lifecycle.viewModelScope
 import com.tishukoff.feature.rag.impl.domain.model.BenchmarkQuestion
 import com.tishukoff.feature.rag.impl.domain.model.BenchmarkQuestionResult
 import com.tishukoff.feature.rag.impl.domain.model.BenchmarkResult
+import com.tishukoff.feature.rag.impl.domain.model.BenchmarkScenarioStep
 import com.tishukoff.feature.rag.impl.domain.model.ChunkingStrategy
 import com.tishukoff.feature.rag.impl.domain.model.RagDocument
 import com.tishukoff.feature.rag.impl.domain.model.RagMode
 import com.tishukoff.feature.rag.impl.domain.model.RagSearchConfig
+import com.tishukoff.feature.rag.impl.domain.model.TaskState
 import com.tishukoff.feature.rag.impl.domain.model.benchmarkQuestions
+import com.tishukoff.feature.rag.impl.domain.model.benchmarkScenario
 import com.tishukoff.feature.rag.impl.domain.model.isReranked
 import com.tishukoff.feature.rag.impl.domain.model.toChunkingStrategy
 import com.tishukoff.feature.rag.impl.domain.repository.LlmClient
 import com.tishukoff.feature.rag.impl.domain.repository.RagRepository
+import com.tishukoff.feature.rag.impl.domain.usecase.ExtractTaskStateUseCase
 import com.tishukoff.feature.rag.impl.domain.usecase.IndexDocumentsUseCase
 import com.tishukoff.feature.rag.impl.domain.usecase.RerankChunksUseCase
 import com.tishukoff.feature.rag.impl.domain.usecase.RewriteQueryUseCase
@@ -47,6 +51,7 @@ internal class RagViewModel(
     private val llmClient: LlmClient,
     private val rewriteQueryUseCase: RewriteQueryUseCase,
     private val rerankChunksUseCase: RerankChunksUseCase,
+    private val extractTaskStateUseCase: ExtractTaskStateUseCase,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(RagUiState())
@@ -75,6 +80,10 @@ internal class RagViewModel(
             is RagIntent.UpdateSimilarityThreshold -> _uiState.update { it.copy(similarityThreshold = intent.value) }
             is RagIntent.UpdateInitialTopK -> _uiState.update { it.copy(initialTopK = intent.value) }
             is RagIntent.UpdateFinalTopK -> _uiState.update { it.copy(finalTopK = intent.value) }
+            is RagIntent.ClearTaskState -> _uiState.update {
+                it.copy(taskState = TaskState(), memoryRagMessages = emptyList())
+            }
+            is RagIntent.RunScenarioBenchmark -> runScenarioBenchmark()
         }
     }
 
@@ -114,6 +123,9 @@ internal class RagViewModel(
                 RagMode.STRUCTURAL_RERANKED -> it.copy(
                     structuralRerankedMessages = it.structuralRerankedMessages + message,
                 )
+                RagMode.MEMORY_RAG -> it.copy(
+                    memoryRagMessages = it.memoryRagMessages + message,
+                )
             }
         }
     }
@@ -125,6 +137,7 @@ internal class RagViewModel(
                 structuralMessages = it.structuralMessages + message,
                 fixedRerankedMessages = it.fixedRerankedMessages + message,
                 structuralRerankedMessages = it.structuralRerankedMessages + message,
+                memoryRagMessages = it.memoryRagMessages + message,
             )
         }
     }
@@ -192,6 +205,10 @@ internal class RagViewModel(
     }
 
     private suspend fun generateAnswerForMode(query: String, mode: RagMode): RagChatMessage {
+        if (mode == RagMode.MEMORY_RAG) {
+            return generateMemoryRagAnswer(query)
+        }
+
         val chunkingStrategy = mode.toChunkingStrategy()
             ?: return generateNoRagAnswer(query)
 
@@ -313,6 +330,263 @@ internal class RagViewModel(
             onFailure = { error ->
                 RagChatMessage(text = "Ошибка поиска: ${error.message}", isUser = false)
             },
+        )
+    }
+
+    private suspend fun generateMemoryRagAnswer(query: String): RagChatMessage {
+        val state = _uiState.value
+        val strategy = ChunkingStrategy.STRUCTURAL
+        val config = RagSearchConfig(
+            initialTopK = state.initialTopK,
+            finalTopK = state.finalTopK,
+            similarityThreshold = state.similarityThreshold,
+        )
+
+        val rewrittenQuery = rewriteQueryUseCase(query).getOrDefault(query)
+
+        val searchResult = searchDocumentsUseCase(rewrittenQuery, strategy, config.initialTopK)
+
+        return searchResult.fold(
+            onSuccess = { results ->
+                if (results.isEmpty()) {
+                    return RagChatMessage(
+                        text = "Не найдено релевантных документов. Попробуйте сначала выполнить индексацию.",
+                        isUser = false,
+                    )
+                }
+
+                val filtered = results.filter { it.score >= config.similarityThreshold }
+                val reranked = if (filtered.isNotEmpty()) {
+                    rerankChunksUseCase(rewrittenQuery, filtered, config.finalTopK)
+                        .getOrDefault(filtered.take(config.finalTopK))
+                } else {
+                    results.take(config.finalTopK)
+                }
+
+                val contextText = reranked.joinToString("\n\n---\n\n") { result ->
+                    "[Источник: ${result.chunk.metadata.source}, " +
+                        "Раздел: ${result.chunk.metadata.section}, " +
+                        "Релевантность: ${"%.2f".format(result.score)}]\n${result.chunk.text}"
+                }
+
+                val sources = reranked.map { result ->
+                    SourceInfo(
+                        fileName = result.chunk.metadata.source,
+                        section = result.chunk.metadata.section,
+                        score = result.score,
+                        chunkPreview = result.chunk.text.take(100) + "...",
+                    )
+                }
+
+                val conversationHistory = buildConversationHistory(state.memoryRagMessages)
+                val taskStateBlock = state.taskState.toPromptBlock()
+
+                val systemPrompt = buildString {
+                    append("Ты — помощник, который ведёт связный диалог и отвечает на вопросы ")
+                    append("строго на основе предоставленного контекста из документов.\n\n")
+                    append("Правила:\n")
+                    append("- Всегда отвечай с учётом предыдущих сообщений диалога\n")
+                    append("- Используй память задачи для понимания цели пользователя\n")
+                    append("- Если контекст не содержит ответа, честно скажи об этом\n")
+                    append("- Всегда указывай источники информации\n\n")
+                    if (taskStateBlock.isNotBlank()) {
+                        append(taskStateBlock)
+                        append("\n")
+                    }
+                    append("Контекст из документов:\n$contextText\n\n")
+                    append("Ты ОБЯЗАН вернуть ответ строго в формате JSON (без markdown-обёртки):\n")
+                    append("{\n")
+                    append("  \"answer\": \"<текст ответа>\",\n")
+                    append("  \"sources\": [{\"file\": \"<имя файла>\", \"section\": \"<раздел>\"}],\n")
+                    append("  \"quotes\": [\"<дословная цитата из контекста>\"]\n")
+                    append("}\n")
+                }
+
+                val messages = buildMessagesWithHistory(conversationHistory, systemPrompt, query)
+                val rawAnswer = callAnthropicApiWithMessages(systemPrompt, messages)
+                val parsed = parseLlmRagResponse(rawAnswer)
+
+                updateTaskState(state.memoryRagMessages, query, parsed.answer)
+
+                val header = if (rewrittenQuery != query) {
+                    "Переписанный запрос: $rewrittenQuery\n\n"
+                } else {
+                    ""
+                }
+
+                RagChatMessage(
+                    text = header + parsed.answer,
+                    isUser = false,
+                    sources = sources,
+                    quotes = parsed.quotes,
+                )
+            },
+            onFailure = { error ->
+                RagChatMessage(text = "Ошибка поиска: ${error.message}", isUser = false)
+            },
+        )
+    }
+
+    private fun buildConversationHistory(messages: List<RagChatMessage>): List<Pair<String, String>> {
+        return messages.map { msg ->
+            val role = if (msg.isUser) "user" else "assistant"
+            role to msg.text
+        }
+    }
+
+    private fun buildMessagesWithHistory(
+        history: List<Pair<String, String>>,
+        systemPrompt: String,
+        currentQuery: String,
+    ): List<Pair<String, String>> {
+        val result = mutableListOf<Pair<String, String>>()
+        // Берём последние 20 сообщений для ограничения контекста
+        val recentHistory = history.takeLast(20)
+        result.addAll(recentHistory)
+        result.add("user" to currentQuery)
+        return result
+    }
+
+    private fun updateTaskState(
+        messages: List<RagChatMessage>,
+        currentQuery: String,
+        currentAnswer: String,
+    ) {
+        viewModelScope.launch {
+            val history = buildString {
+                messages.forEach { msg ->
+                    val role = if (msg.isUser) "User" else "Assistant"
+                    appendLine("$role: ${msg.text}")
+                }
+                appendLine("User: $currentQuery")
+                appendLine("Assistant: $currentAnswer")
+            }
+            val currentState = _uiState.value.taskState
+            extractTaskStateUseCase(history, currentState)
+                .onSuccess { newState ->
+                    _uiState.update { it.copy(taskState = newState) }
+                }
+        }
+    }
+
+    private suspend fun callAnthropicApiWithMessages(
+        systemPrompt: String,
+        messages: List<Pair<String, String>>,
+    ): String {
+        return try {
+            val requestBody = buildJsonObject {
+                put("model", "claude-sonnet-4-20250514")
+                put("max_tokens", 1024)
+                put("system", systemPrompt)
+                put("messages", buildJsonArray {
+                    messages.forEach { (role, content) ->
+                        add(buildJsonObject {
+                            put("role", role)
+                            put("content", content)
+                        })
+                    }
+                })
+            }.toString().toRequestBody("application/json".toMediaType())
+
+            val request = Request.Builder()
+                .url("https://api.anthropic.com/v1/messages")
+                .addHeader("x-api-key", anthropicApiKey)
+                .addHeader("anthropic-version", "2023-06-01")
+                .addHeader("content-type", "application/json")
+                .post(requestBody)
+                .build()
+
+            val response = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                httpClient.newCall(request).execute()
+            }
+
+            if (!response.isSuccessful) {
+                return "Ошибка API: ${response.code}"
+            }
+
+            val body = response.body?.string() ?: return "Пустой ответ"
+            val jsonResponse = json.decodeFromString<JsonObject>(body)
+            val content = jsonResponse["content"]?.jsonArray?.firstOrNull()
+                ?.jsonObject?.get("text")?.jsonPrimitive?.content
+
+            content ?: "Не удалось получить ответ"
+        } catch (e: Exception) {
+            "Ошибка генерации ответа: ${e.message}"
+        }
+    }
+
+    private fun runScenarioBenchmark() {
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isBenchmarkRunning = true,
+                    benchmarkResult = null,
+                    benchmarkProgress = "",
+                    taskState = TaskState(),
+                    memoryRagMessages = emptyList(),
+                )
+            }
+
+            val allResults = mutableListOf<BenchmarkQuestionResult>()
+            val scenario = benchmarkScenario
+
+            addMessage(
+                RagChatMessage(
+                    text = "=== Сценарий: ${scenario.name} ===",
+                    isUser = false,
+                ),
+                RagMode.MEMORY_RAG,
+            )
+
+            for ((stepIndex, step) in scenario.steps.withIndex()) {
+                _uiState.update {
+                    it.copy(
+                        benchmarkProgress = "Шаг ${stepIndex + 1}/${scenario.steps.size}",
+                    )
+                }
+
+                addMessage(
+                    RagChatMessage(text = step.question, isUser = true),
+                    RagMode.MEMORY_RAG,
+                )
+
+                val answerMessage = generateMemoryRagAnswer(step.question)
+                addMessage(answerMessage, RagMode.MEMORY_RAG)
+
+                val result = evaluateScenarioStep(step, answerMessage)
+                allResults.add(result)
+            }
+
+            val benchmarkResult = BenchmarkResult(allResults)
+            val summaryText = buildBenchmarkSummary(benchmarkResult)
+            addMessage(RagChatMessage(text = summaryText, isUser = false), RagMode.MEMORY_RAG)
+
+            _uiState.update {
+                it.copy(
+                    isBenchmarkRunning = false,
+                    benchmarkProgress = "",
+                    benchmarkResult = benchmarkResult,
+                )
+            }
+        }
+    }
+
+    private fun evaluateScenarioStep(
+        step: BenchmarkScenarioStep,
+        message: RagChatMessage,
+    ): BenchmarkQuestionResult {
+        val lowerAnswer = message.text.lowercase()
+        val foundKeywords = step.expectedKeywords.filter { keyword ->
+            lowerAnswer.contains(keyword.lowercase())
+        }
+        return BenchmarkQuestionResult(
+            question = step.question,
+            answer = message.text,
+            expectedKeywords = step.expectedKeywords,
+            foundKeywords = foundKeywords,
+            passed = foundKeywords.isNotEmpty(),
+            hasSources = message.sources.isNotEmpty(),
+            hasQuotes = message.quotes.isNotEmpty(),
         )
     }
 
