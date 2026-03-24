@@ -7,6 +7,7 @@ import com.tishukoff.core.database.impl.databaseModule
 import com.tishukoff.feature.agent.impl.agentModule
 import com.tishukoff.feature.invariant.impl.di.invariantModule
 import com.tishukoff.feature.mcp.impl.di.mcpModule
+import com.tishukoff.feature.localllm.impl.di.localLlmModule
 import com.tishukoff.feature.rag.impl.di.ragModule
 import com.tishukoff.feature.memory.impl.di.memoryModule
 import com.tishukoff.feature.profile.impl.di.profileModule
@@ -26,7 +27,8 @@ val appModule = module {
         taskStateModule,
         invariantModule,
         mcpModule,
-        ragModule
+        ragModule,
+        localLlmModule
     )
     single {
         get<Context>().getSharedPreferences("llm_settings", Context.MODE_PRIVATE)

@@ -53,6 +53,8 @@ dependencies {
     implementation(project(":feature:mcp:impl"))
     implementation(project(":feature:rag:api"))
     implementation(project(":feature:rag:impl"))
+    implementation(project(":feature:localllm:api"))
+    implementation(project(":feature:localllm:impl"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
