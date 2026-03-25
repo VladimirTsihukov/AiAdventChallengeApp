@@ -52,7 +52,9 @@ import com.tishukoff.feature.mcp.impl.presentation.pipeline.ui.PipelineScreen
 import com.tishukoff.feature.mcp.impl.presentation.ui.McpScreen
 import com.tishukoff.feature.mcp.impl.presentation.scheduler.ui.SchedulerScreen
 import com.tishukoff.feature.localllm.api.LocalLlmRoute
+import com.tishukoff.feature.localllm.api.TelegramBotRoute
 import com.tishukoff.feature.localllm.impl.presentation.ui.LocalLlmChatScreen
+import com.tishukoff.feature.localllm.impl.presentation.telegrambot.ui.TelegramBotScreen
 import com.tishukoff.feature.rag.api.RagRoute
 import com.tishukoff.feature.rag.impl.presentation.ui.RagChatScreen
 import com.tishukoff.feature.setting.api.SettingRoute
@@ -106,6 +108,9 @@ fun AppNavigation() {
                     },
                     onNavigateToLocalLlm = dropUnlessResumed {
                         backStack.add(LocalLlmRoute)
+                    },
+                    onNavigateToTelegramBot = dropUnlessResumed {
+                        backStack.add(TelegramBotRoute)
                     },
                 )
             }
@@ -198,6 +203,14 @@ fun AppNavigation() {
                     },
                 )
             }
+
+            entry<TelegramBotRoute> {
+                TelegramBotScreen(
+                    onBack = dropUnlessResumed {
+                        backStack.removeLastOrNull()
+                    },
+                )
+            }
         },
     )
 }
@@ -212,6 +225,7 @@ fun ChatScreenWithDrawer(
     onNavigateToMcp: () -> Unit,
     onNavigateToRag: () -> Unit,
     onNavigateToLocalLlm: () -> Unit,
+    onNavigateToTelegramBot: () -> Unit,
     viewModel: ChatViewModel = koinViewModel(),
 ) {
     val state by viewModel.uiState.collectAsState()
@@ -248,6 +262,10 @@ fun ChatScreenWithDrawer(
                     onLocalLlmClick = {
                         scope.launch { drawerState.close() }
                         onNavigateToLocalLlm()
+                    },
+                    onTelegramBotClick = {
+                        scope.launch { drawerState.close() }
+                        onNavigateToTelegramBot()
                     },
                     onChatSelect = { chatId ->
                         viewModel.handleIntent(ChatIntent.SelectChat(chatId))

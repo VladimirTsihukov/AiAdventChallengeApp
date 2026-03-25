@@ -1,6 +1,7 @@
 plugins {
     id("aiadvent.android.library")
     id("aiadvent.android.compose")
+    alias(libs.plugins.kotlin.serialization)
 }
 
 android {
