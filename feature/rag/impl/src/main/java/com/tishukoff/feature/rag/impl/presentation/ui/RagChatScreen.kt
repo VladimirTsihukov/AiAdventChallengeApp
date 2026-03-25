@@ -62,8 +62,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.tishukoff.feature.rag.impl.domain.model.RagMode
+import com.tishukoff.feature.rag.impl.domain.model.isComparison
+import com.tishukoff.feature.rag.impl.domain.model.isLocal
 import com.tishukoff.feature.rag.impl.domain.model.isReranked
 import com.tishukoff.feature.rag.impl.domain.model.TaskState
+import com.tishukoff.feature.rag.impl.presentation.ComparisonEntry
 import com.tishukoff.feature.rag.impl.presentation.RagChatMessage
 import com.tishukoff.feature.rag.impl.presentation.RagIntent
 import com.tishukoff.feature.rag.impl.presentation.RagUiState
@@ -128,6 +131,10 @@ fun RagChatScreen(
                         RagMode.FIXED_RERANKED -> "Fixed+RR"
                         RagMode.STRUCTURAL_RERANKED -> "Struct+RR"
                         RagMode.MEMORY_RAG -> "RAG+Mem"
+                        RagMode.LOCAL_FIXED -> "L:Fixed"
+                        RagMode.LOCAL_STRUCTURAL -> "L:Struct"
+                        RagMode.LOCAL_NO_RAG -> "L:NoRAG"
+                        RagMode.COMPARISON -> "Compare"
                     }
                     Tab(
                         selected = pagerState.currentPage == index,
@@ -162,20 +169,31 @@ fun RagChatScreen(
                 modifier = Modifier.weight(1f),
             ) { page ->
                 val pageMode = modes[page]
-                val messages = when (pageMode) {
-                    RagMode.FIXED_SIZE -> state.fixedSizeMessages
-                    RagMode.STRUCTURAL -> state.structuralMessages
-                    RagMode.NO_RAG -> state.noRagMessages
-                    RagMode.FIXED_RERANKED -> state.fixedRerankedMessages
-                    RagMode.STRUCTURAL_RERANKED -> state.structuralRerankedMessages
-                    RagMode.MEMORY_RAG -> state.memoryRagMessages
+                if (pageMode.isComparison) {
+                    ComparisonPage(
+                        entries = state.comparisonEntries,
+                        isLoading = state.isLoading && state.currentMode == pageMode,
+                    )
+                } else {
+                    val messages = when (pageMode) {
+                        RagMode.FIXED_SIZE -> state.fixedSizeMessages
+                        RagMode.STRUCTURAL -> state.structuralMessages
+                        RagMode.NO_RAG -> state.noRagMessages
+                        RagMode.FIXED_RERANKED -> state.fixedRerankedMessages
+                        RagMode.STRUCTURAL_RERANKED -> state.structuralRerankedMessages
+                        RagMode.MEMORY_RAG -> state.memoryRagMessages
+                        RagMode.LOCAL_FIXED -> state.localFixedMessages
+                        RagMode.LOCAL_STRUCTURAL -> state.localStructuralMessages
+                        RagMode.LOCAL_NO_RAG -> state.localNoRagMessages
+                        RagMode.COMPARISON -> emptyList()
+                    }
+                    RagChatPage(
+                        messages = messages,
+                        isLoading = state.isLoading && state.currentMode == pageMode,
+                        isBenchmarkRunning = state.isBenchmarkRunning && state.currentMode == pageMode,
+                        benchmarkProgress = state.benchmarkProgress,
+                    )
                 }
-                RagChatPage(
-                    messages = messages,
-                    isLoading = state.isLoading && state.currentMode == pageMode,
-                    isBenchmarkRunning = state.isBenchmarkRunning && state.currentMode == pageMode,
-                    benchmarkProgress = state.benchmarkProgress,
-                )
             }
 
             state.error?.let { error ->
@@ -196,7 +214,10 @@ fun RagChatScreen(
                 isLoading = state.isLoading,
                 isIndexing = state.isIndexing,
                 isBenchmarkRunning = state.isBenchmarkRunning,
-                showIndexButton = state.currentMode != RagMode.NO_RAG,
+                showIndexButton = state.currentMode != RagMode.NO_RAG &&
+                    state.currentMode != RagMode.LOCAL_NO_RAG &&
+                    !state.currentMode.isComparison,
+                showBenchmarkButton = !state.currentMode.isComparison,
                 isMemoryMode = state.currentMode == RagMode.MEMORY_RAG,
                 onInputChange = { viewModel.handleIntent(RagIntent.UpdateInput(it)) },
                 onSend = { viewModel.handleIntent(RagIntent.SendMessage) },
@@ -298,6 +319,168 @@ private fun RagChatPage(
 }
 
 @Composable
+private fun ComparisonPage(
+    entries: List<ComparisonEntry>,
+    isLoading: Boolean,
+) {
+    val listState = rememberLazyListState()
+
+    LaunchedEffect(entries.size) {
+        if (entries.isNotEmpty()) {
+            listState.animateScrollToItem(entries.lastIndex)
+        }
+    }
+
+    LazyColumn(
+        state = listState,
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(vertical = 12.dp),
+    ) {
+        if (entries.isEmpty() && !isLoading) {
+            item {
+                Box(
+                    modifier = Modifier.fillParentMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "Cloud vs Local",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Задайте вопрос — ответ придёт от обеих моделей",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        )
+                    }
+                }
+            }
+        }
+
+        items(entries) { entry ->
+            ComparisonEntryCard(entry = entry)
+        }
+
+        if (isLoading) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        strokeWidth = 2.dp,
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Ожидаем ответы...",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ComparisonEntryCard(entry: ComparisonEntry) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text(
+                text = entry.query,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                ComparisonAnswerBlock(
+                    label = "Cloud (Claude)",
+                    answer = entry.cloudAnswer,
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    textColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.weight(1f),
+                )
+                ComparisonAnswerBlock(
+                    label = "Local (phi3:mini)",
+                    answer = entry.localAnswer,
+                    containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                    textColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ComparisonAnswerBlock(
+    label: String,
+    answer: RagChatMessage?,
+    containerColor: androidx.compose.ui.graphics.Color,
+    textColor: androidx.compose.ui.graphics.Color,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(containerColor)
+            .padding(8.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = textColor,
+            )
+            if (answer?.durationMs != null) {
+                Text(
+                    text = "${"%.1f".format(answer.durationMs / 1000.0)}s",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline,
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        if (answer != null) {
+            Text(
+                text = answer.text,
+                style = MaterialTheme.typography.bodySmall,
+                color = textColor,
+            )
+        } else {
+            CircularProgressIndicator(
+                modifier = Modifier
+                    .size(16.dp)
+                    .align(Alignment.CenterHorizontally),
+                strokeWidth = 2.dp,
+            )
+        }
+    }
+}
+
+@Composable
 private fun IndexingProgress(progress: String) {
     Column(
         modifier = Modifier
@@ -340,11 +523,30 @@ private fun RagMessageBubble(message: RagChatMessage) {
                     .padding(horizontal = 16.dp, vertical = 10.dp)
                     .fillMaxWidth(if (message.isUser) 0.8f else 0.95f),
             ) {
-                Text(
-                    text = message.text,
-                    color = textColor,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
+                Column {
+                    if (message.modelLabel != null) {
+                        Text(
+                            text = message.modelLabel,
+                            color = MaterialTheme.colorScheme.primary,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                    }
+                    Text(
+                        text = message.text,
+                        color = textColor,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    if (message.durationMs != null) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "${"%.1f".format(message.durationMs / 1000.0)}s",
+                            color = MaterialTheme.colorScheme.outline,
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    }
+                }
             }
         }
 
@@ -636,6 +838,7 @@ private fun BottomInputBar(
     isIndexing: Boolean,
     isBenchmarkRunning: Boolean,
     showIndexButton: Boolean,
+    showBenchmarkButton: Boolean = true,
     isMemoryMode: Boolean,
     onInputChange: (String) -> Unit,
     onSend: () -> Unit,
@@ -649,42 +852,46 @@ private fun BottomInputBar(
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 8.dp),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            if (showIndexButton) {
-                Button(
-                    onClick = onIndex,
-                    enabled = !isBusy,
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.tertiary,
-                    ),
-                ) {
-                    Text(
-                        text = if (isIndexing) "Индексация..." else "Индексировать",
-                        color = MaterialTheme.colorScheme.onTertiary,
-                    )
-                }
-            }
-
-            Button(
-                onClick = onBenchmark,
-                enabled = !isBusy,
-                modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.secondary,
-                ),
+        if (showIndexButton || showBenchmarkButton) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text(
-                    text = when {
-                    isBenchmarkRunning -> "Тест..."
-                    isMemoryMode -> "Сценарий"
-                    else -> "Тест (10)"
-                },
-                    color = MaterialTheme.colorScheme.onSecondary,
-                )
+                if (showIndexButton) {
+                    Button(
+                        onClick = onIndex,
+                        enabled = !isBusy,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.tertiary,
+                        ),
+                    ) {
+                        Text(
+                            text = if (isIndexing) "Индексация..." else "Индексировать",
+                            color = MaterialTheme.colorScheme.onTertiary,
+                        )
+                    }
+                }
+
+                if (showBenchmarkButton) {
+                    Button(
+                        onClick = onBenchmark,
+                        enabled = !isBusy,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.secondary,
+                        ),
+                    ) {
+                        Text(
+                            text = when {
+                                isBenchmarkRunning -> "Тест..."
+                                isMemoryMode -> "Сценарий"
+                                else -> "Тест (10)"
+                            },
+                            color = MaterialTheme.colorScheme.onSecondary,
+                        )
+                    }
+                }
             }
         }
 

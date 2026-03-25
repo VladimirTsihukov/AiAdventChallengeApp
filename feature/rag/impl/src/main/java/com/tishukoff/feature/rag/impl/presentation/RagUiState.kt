@@ -11,6 +11,10 @@ internal data class RagUiState(
     val fixedRerankedMessages: List<RagChatMessage> = emptyList(),
     val structuralRerankedMessages: List<RagChatMessage> = emptyList(),
     val memoryRagMessages: List<RagChatMessage> = emptyList(),
+    val localFixedMessages: List<RagChatMessage> = emptyList(),
+    val localStructuralMessages: List<RagChatMessage> = emptyList(),
+    val localNoRagMessages: List<RagChatMessage> = emptyList(),
+    val comparisonEntries: List<ComparisonEntry> = emptyList(),
     val taskState: TaskState = TaskState(),
     val input: String = "",
     val isLoading: Boolean = false,
@@ -35,6 +39,10 @@ internal data class RagUiState(
             RagMode.FIXED_RERANKED -> fixedRerankedMessages
             RagMode.STRUCTURAL_RERANKED -> structuralRerankedMessages
             RagMode.MEMORY_RAG -> memoryRagMessages
+            RagMode.LOCAL_FIXED -> localFixedMessages
+            RagMode.LOCAL_STRUCTURAL -> localStructuralMessages
+            RagMode.LOCAL_NO_RAG -> localNoRagMessages
+            RagMode.COMPARISON -> emptyList()
         }
 }
 
@@ -43,6 +51,8 @@ internal data class RagChatMessage(
     val isUser: Boolean,
     val sources: List<SourceInfo> = emptyList(),
     val quotes: List<String> = emptyList(),
+    val durationMs: Long? = null,
+    val modelLabel: String? = null,
 )
 
 internal data class SourceInfo(
@@ -50,4 +60,10 @@ internal data class SourceInfo(
     val section: String,
     val score: Float,
     val chunkPreview: String,
+)
+
+internal data class ComparisonEntry(
+    val query: String,
+    val cloudAnswer: RagChatMessage? = null,
+    val localAnswer: RagChatMessage? = null,
 )

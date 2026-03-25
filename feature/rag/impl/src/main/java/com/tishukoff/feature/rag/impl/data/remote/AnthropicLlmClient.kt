@@ -65,4 +65,47 @@ class AnthropicLlmClient(
             ?.jsonObject?.get("text")?.jsonPrimitive?.content
             ?: error("Не удалось получить ответ")
     }
+
+    override suspend fun chat(
+        messages: List<Pair<String, String>>,
+        systemPrompt: String,
+    ): String {
+        val requestBody = buildJsonObject {
+            put("model", "claude-sonnet-4-20250514")
+            put("max_tokens", 1024)
+            if (systemPrompt.isNotBlank()) {
+                put("system", systemPrompt)
+            }
+            put("messages", buildJsonArray {
+                messages.forEach { (role, content) ->
+                    add(buildJsonObject {
+                        put("role", role)
+                        put("content", content)
+                    })
+                }
+            })
+        }.toString().toRequestBody("application/json".toMediaType())
+
+        val request = Request.Builder()
+            .url("https://api.anthropic.com/v1/messages")
+            .addHeader("x-api-key", apiKey)
+            .addHeader("anthropic-version", "2023-06-01")
+            .addHeader("content-type", "application/json")
+            .post(requestBody)
+            .build()
+
+        val response = withContext(Dispatchers.IO) {
+            httpClient.newCall(request).execute()
+        }
+
+        if (!response.isSuccessful) {
+            error("Ошибка API: ${response.code}")
+        }
+
+        val body = response.body?.string() ?: error("Пустой ответ")
+        val jsonResponse = json.decodeFromString<JsonObject>(body)
+        return jsonResponse["content"]?.jsonArray?.firstOrNull()
+            ?.jsonObject?.get("text")?.jsonPrimitive?.content
+            ?: error("Не удалось получить ответ")
+    }
 }

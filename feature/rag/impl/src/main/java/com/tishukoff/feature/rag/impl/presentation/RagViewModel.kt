@@ -14,6 +14,8 @@ import com.tishukoff.feature.rag.impl.domain.model.RagSearchConfig
 import com.tishukoff.feature.rag.impl.domain.model.TaskState
 import com.tishukoff.feature.rag.impl.domain.model.benchmarkQuestions
 import com.tishukoff.feature.rag.impl.domain.model.benchmarkScenario
+import com.tishukoff.feature.rag.impl.domain.model.isComparison
+import com.tishukoff.feature.rag.impl.domain.model.isLocal
 import com.tishukoff.feature.rag.impl.domain.model.isReranked
 import com.tishukoff.feature.rag.impl.domain.model.toChunkingStrategy
 import com.tishukoff.feature.rag.impl.domain.repository.LlmClient
@@ -23,6 +25,8 @@ import com.tishukoff.feature.rag.impl.domain.usecase.IndexDocumentsUseCase
 import com.tishukoff.feature.rag.impl.domain.usecase.RerankChunksUseCase
 import com.tishukoff.feature.rag.impl.domain.usecase.RewriteQueryUseCase
 import com.tishukoff.feature.rag.impl.domain.usecase.SearchDocumentsUseCase
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -30,25 +34,17 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.buildJsonArray
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.put
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import java.util.concurrent.TimeUnit
 
 internal class RagViewModel(
     private val context: Context,
     private val indexDocumentsUseCase: IndexDocumentsUseCase,
     private val searchDocumentsUseCase: SearchDocumentsUseCase,
-    private val anthropicApiKey: String,
     private val ragRepository: RagRepository,
-    private val llmClient: LlmClient,
+    private val cloudLlmClient: LlmClient,
+    private val localLlmClient: LlmClient,
     private val rewriteQueryUseCase: RewriteQueryUseCase,
     private val rerankChunksUseCase: RerankChunksUseCase,
     private val extractTaskStateUseCase: ExtractTaskStateUseCase,
@@ -57,12 +53,10 @@ internal class RagViewModel(
     private val _uiState = MutableStateFlow(RagUiState())
     val uiState: StateFlow<RagUiState> = _uiState.asStateFlow()
 
-    private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .build()
-
     private val json = Json { ignoreUnknownKeys = true }
+
+    private fun RagMode.selectLlmClient(): LlmClient =
+        if (isLocal) localLlmClient else cloudLlmClient
 
     init {
         loadChunkCounts()
@@ -126,6 +120,16 @@ internal class RagViewModel(
                 RagMode.MEMORY_RAG -> it.copy(
                     memoryRagMessages = it.memoryRagMessages + message,
                 )
+                RagMode.LOCAL_FIXED -> it.copy(
+                    localFixedMessages = it.localFixedMessages + message,
+                )
+                RagMode.LOCAL_STRUCTURAL -> it.copy(
+                    localStructuralMessages = it.localStructuralMessages + message,
+                )
+                RagMode.LOCAL_NO_RAG -> it.copy(
+                    localNoRagMessages = it.localNoRagMessages + message,
+                )
+                RagMode.COMPARISON -> it
             }
         }
     }
@@ -138,6 +142,8 @@ internal class RagViewModel(
                 fixedRerankedMessages = it.fixedRerankedMessages + message,
                 structuralRerankedMessages = it.structuralRerankedMessages + message,
                 memoryRagMessages = it.memoryRagMessages + message,
+                localFixedMessages = it.localFixedMessages + message,
+                localStructuralMessages = it.localStructuralMessages + message,
             )
         }
     }
@@ -195,11 +201,60 @@ internal class RagViewModel(
         val mode = _uiState.value.currentMode
 
         _uiState.update { it.copy(input = "", isLoading = true) }
-        addMessage(RagChatMessage(text = query, isUser = true))
 
+        if (mode.isComparison) {
+            sendComparisonMessage(query)
+        } else {
+            addMessage(RagChatMessage(text = query, isUser = true))
+            viewModelScope.launch {
+                val answer = generateAnswerForMode(query, mode)
+                addMessage(answer)
+                _uiState.update { it.copy(isLoading = false) }
+            }
+        }
+    }
+
+    private fun sendComparisonMessage(query: String) {
         viewModelScope.launch {
-            val answer = generateAnswerForMode(query, mode)
-            addMessage(answer)
+            val strategy = ChunkingStrategy.STRUCTURAL
+
+            val entry = ComparisonEntry(query = query)
+            _uiState.update { it.copy(comparisonEntries = it.comparisonEntries + entry) }
+
+            try {
+                coroutineScope {
+                    val cloudDeferred = async {
+                        val start = System.currentTimeMillis()
+                        val answer = generateRagAnswer(query, strategy, cloudLlmClient)
+                        val duration = System.currentTimeMillis() - start
+                        answer.copy(durationMs = duration, modelLabel = "Cloud (Claude)")
+                    }
+                    val localDeferred = async {
+                        val start = System.currentTimeMillis()
+                        val answer = generateLocalRagAnswer(query, strategy)
+                        val duration = System.currentTimeMillis() - start
+                        answer.copy(durationMs = duration, modelLabel = "Local (phi3:mini)")
+                    }
+
+                    val cloudAnswer = cloudDeferred.await()
+                    val localAnswer = localDeferred.await()
+
+                    _uiState.update { state ->
+                        val entries = state.comparisonEntries.toMutableList()
+                        val idx = entries.indexOfLast { it.query == query && it.cloudAnswer == null }
+                        if (idx >= 0) {
+                            entries[idx] = entries[idx].copy(
+                                cloudAnswer = cloudAnswer,
+                                localAnswer = localAnswer,
+                            )
+                        }
+                        state.copy(comparisonEntries = entries)
+                    }
+                }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(error = "Ошибка сравнения: ${e.message}") }
+            }
+
             _uiState.update { it.copy(isLoading = false) }
         }
     }
@@ -209,8 +264,9 @@ internal class RagViewModel(
             return generateMemoryRagAnswer(query)
         }
 
+        val llmClient = mode.selectLlmClient()
         val chunkingStrategy = mode.toChunkingStrategy()
-            ?: return generateNoRagAnswer(query)
+            ?: return generateNoRagAnswer(query, llmClient)
 
         if (mode.isReranked) {
             val state = _uiState.value
@@ -222,7 +278,11 @@ internal class RagViewModel(
             return generateRerankedRagAnswer(query, chunkingStrategy, config)
         }
 
-        return generateRagAnswer(query, chunkingStrategy)
+        if (mode.isLocal) {
+            return generateLocalRagAnswer(query, chunkingStrategy)
+        }
+
+        return generateRagAnswer(query, chunkingStrategy, llmClient)
     }
 
     private suspend fun generateRerankedRagAnswer(
@@ -291,7 +351,11 @@ internal class RagViewModel(
         )
     }
 
-    private suspend fun generateRagAnswer(query: String, strategy: ChunkingStrategy): RagChatMessage {
+    private suspend fun generateRagAnswer(
+        query: String,
+        strategy: ChunkingStrategy,
+        llmClient: LlmClient = cloudLlmClient,
+    ): RagChatMessage {
         val searchResult = searchDocumentsUseCase(query, strategy)
 
         return searchResult.fold(
@@ -318,13 +382,69 @@ internal class RagViewModel(
                     )
                 }
 
-                val rawAnswer = generateRagLlmAnswer(query, contextText)
+                val rawAnswer = generateRagLlmAnswer(query, contextText, llmClient)
                 val parsed = parseLlmRagResponse(rawAnswer)
                 RagChatMessage(
                     text = parsed.answer,
                     isUser = false,
                     sources = sources,
                     quotes = parsed.quotes,
+                )
+            },
+            onFailure = { error ->
+                RagChatMessage(text = "Ошибка поиска: ${error.message}", isUser = false)
+            },
+        )
+    }
+
+    private suspend fun generateLocalRagAnswer(
+        query: String,
+        strategy: ChunkingStrategy,
+    ): RagChatMessage {
+        val searchResult = searchDocumentsUseCase(query, strategy)
+
+        return searchResult.fold(
+            onSuccess = { results ->
+                if (results.isEmpty()) {
+                    return RagChatMessage(
+                        text = "Не найдено релевантных документов. Попробуйте сначала выполнить индексацию.",
+                        isUser = false,
+                    )
+                }
+
+                val contextText = results.joinToString("\n\n---\n\n") { result ->
+                    "[Источник: ${result.chunk.metadata.source}, " +
+                        "Раздел: ${result.chunk.metadata.section}]\n${result.chunk.text}"
+                }
+
+                val sources = results.map { result ->
+                    SourceInfo(
+                        fileName = result.chunk.metadata.source,
+                        section = result.chunk.metadata.section,
+                        score = result.score,
+                        chunkPreview = result.chunk.text.take(100) + "...",
+                    )
+                }
+
+                val prompt = buildString {
+                    append("You are a helpful assistant that answers questions based on the provided context.\n")
+                    append("If the context does not contain the answer, say so honestly.\n")
+                    append("Always mention the source documents.\n\n")
+                    append("Context:\n$contextText\n\n")
+                    append("Question: $query\n\n")
+                    append("Answer:")
+                }
+
+                val rawAnswer = try {
+                    localLlmClient.complete(prompt)
+                } catch (e: Exception) {
+                    "Ошибка локальной LLM: ${e.message}"
+                }
+
+                RagChatMessage(
+                    text = rawAnswer,
+                    isUser = false,
+                    sources = sources,
                 )
             },
             onFailure = { error ->
@@ -403,7 +523,11 @@ internal class RagViewModel(
                 }
 
                 val messages = buildMessagesWithHistory(conversationHistory, systemPrompt, query)
-                val rawAnswer = callAnthropicApiWithMessages(systemPrompt, messages)
+                val rawAnswer = try {
+                    cloudLlmClient.chat(messages, systemPrompt)
+                } catch (e: Exception) {
+                    "Ошибка генерации ответа: ${e.message}"
+                }
                 val parsed = parseLlmRagResponse(rawAnswer)
 
                 updateTaskState(state.memoryRagMessages, query, parsed.answer)
@@ -466,52 +590,6 @@ internal class RagViewModel(
                 .onSuccess { newState ->
                     _uiState.update { it.copy(taskState = newState) }
                 }
-        }
-    }
-
-    private suspend fun callAnthropicApiWithMessages(
-        systemPrompt: String,
-        messages: List<Pair<String, String>>,
-    ): String {
-        return try {
-            val requestBody = buildJsonObject {
-                put("model", "claude-sonnet-4-20250514")
-                put("max_tokens", 1024)
-                put("system", systemPrompt)
-                put("messages", buildJsonArray {
-                    messages.forEach { (role, content) ->
-                        add(buildJsonObject {
-                            put("role", role)
-                            put("content", content)
-                        })
-                    }
-                })
-            }.toString().toRequestBody("application/json".toMediaType())
-
-            val request = Request.Builder()
-                .url("https://api.anthropic.com/v1/messages")
-                .addHeader("x-api-key", anthropicApiKey)
-                .addHeader("anthropic-version", "2023-06-01")
-                .addHeader("content-type", "application/json")
-                .post(requestBody)
-                .build()
-
-            val response = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                httpClient.newCall(request).execute()
-            }
-
-            if (!response.isSuccessful) {
-                return "Ошибка API: ${response.code}"
-            }
-
-            val body = response.body?.string() ?: return "Пустой ответ"
-            val jsonResponse = json.decodeFromString<JsonObject>(body)
-            val content = jsonResponse["content"]?.jsonArray?.firstOrNull()
-                ?.jsonObject?.get("text")?.jsonPrimitive?.content
-
-            content ?: "Не удалось получить ответ"
-        } catch (e: Exception) {
-            "Ошибка генерации ответа: ${e.message}"
         }
     }
 
@@ -590,8 +668,11 @@ internal class RagViewModel(
         )
     }
 
-    private suspend fun generateNoRagAnswer(query: String): RagChatMessage {
-        val answer = generateDirectLlmAnswer(query)
+    private suspend fun generateNoRagAnswer(
+        query: String,
+        llmClient: LlmClient = cloudLlmClient,
+    ): RagChatMessage {
+        val answer = generateDirectLlmAnswer(query, llmClient)
         return RagChatMessage(text = answer, isUser = false)
     }
 
@@ -711,73 +792,46 @@ internal class RagViewModel(
         }
     }
 
-    private suspend fun generateRagLlmAnswer(query: String, context: String): String {
-        return callAnthropicApi(
-            buildString {
-                append("Ты — помощник, который отвечает на вопросы строго на основе предоставленного контекста.\n")
-                append("Если контекст не содержит ответа на вопрос, верни JSON с answer: \"Я не могу ответить на этот вопрос на основе имеющихся данных.\"\n\n")
-                append("Ты ОБЯЗАН вернуть ответ строго в формате JSON (без markdown-обёртки):\n")
-                append("{\n")
-                append("  \"answer\": \"<текст ответа>\",\n")
-                append("  \"sources\": [{\"file\": \"<имя файла>\", \"section\": \"<раздел>\"}],\n")
-                append("  \"quotes\": [\"<дословная цитата из контекста>\"]\n")
-                append("}\n\n")
-                append("Правила:\n")
-                append("- answer: развёрнутый ответ на вопрос\n")
-                append("- sources: список источников из контекста (file и section берутся из заголовков чанков)\n")
-                append("- quotes: дословные фрагменты из контекста, подтверждающие ответ\n")
-                append("- Если ответа нет в контексте — answer содержит отказ, sources и quotes пустые\n\n")
-                append("Контекст:\n$context\n\n")
-                append("Вопрос: $query")
-            }
-        )
-    }
-
-    private suspend fun generateDirectLlmAnswer(query: String): String {
-        return callAnthropicApi(
-            buildString {
-                append("Ты — помощник, который отвечает на вопросы.\n")
-                append("Отвечай кратко и по существу.\n\n")
-                append("Вопрос: $query")
-            }
-        )
-    }
-
-    private suspend fun callAnthropicApi(userMessage: String): String {
+    private suspend fun generateRagLlmAnswer(
+        query: String,
+        context: String,
+        llmClient: LlmClient = cloudLlmClient,
+    ): String {
+        val prompt = buildString {
+            append("Ты — помощник, который отвечает на вопросы строго на основе предоставленного контекста.\n")
+            append("Если контекст не содержит ответа на вопрос, верни JSON с answer: \"Я не могу ответить на этот вопрос на основе имеющихся данных.\"\n\n")
+            append("Ты ОБЯЗАН вернуть ответ строго в формате JSON (без markdown-обёртки):\n")
+            append("{\n")
+            append("  \"answer\": \"<текст ответа>\",\n")
+            append("  \"sources\": [{\"file\": \"<имя файла>\", \"section\": \"<раздел>\"}],\n")
+            append("  \"quotes\": [\"<дословная цитата из контекста>\"]\n")
+            append("}\n\n")
+            append("Правила:\n")
+            append("- answer: развёрнутый ответ на вопрос\n")
+            append("- sources: список источников из контекста (file и section берутся из заголовков чанков)\n")
+            append("- quotes: дословные фрагменты из контекста, подтверждающие ответ\n")
+            append("- Если ответа нет в контексте — answer содержит отказ, sources и quotes пустые\n\n")
+            append("Контекст:\n$context\n\n")
+            append("Вопрос: $query")
+        }
         return try {
-            val requestBody = buildJsonObject {
-                put("model", "claude-sonnet-4-20250514")
-                put("max_tokens", 1024)
-                put("messages", buildJsonArray {
-                    add(buildJsonObject {
-                        put("role", "user")
-                        put("content", userMessage)
-                    })
-                })
-            }.toString().toRequestBody("application/json".toMediaType())
+            llmClient.complete(prompt)
+        } catch (e: Exception) {
+            "Ошибка генерации ответа: ${e.message}"
+        }
+    }
 
-            val request = Request.Builder()
-                .url("https://api.anthropic.com/v1/messages")
-                .addHeader("x-api-key", anthropicApiKey)
-                .addHeader("anthropic-version", "2023-06-01")
-                .addHeader("content-type", "application/json")
-                .post(requestBody)
-                .build()
-
-            val response = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                httpClient.newCall(request).execute()
-            }
-
-            if (!response.isSuccessful) {
-                return "Ошибка API: ${response.code}"
-            }
-
-            val body = response.body?.string() ?: return "Пустой ответ"
-            val jsonResponse = json.decodeFromString<JsonObject>(body)
-            val content = jsonResponse["content"]?.jsonArray?.firstOrNull()
-                ?.jsonObject?.get("text")?.jsonPrimitive?.content
-
-            content ?: "Не удалось получить ответ"
+    private suspend fun generateDirectLlmAnswer(
+        query: String,
+        llmClient: LlmClient = cloudLlmClient,
+    ): String {
+        val prompt = buildString {
+            append("Ты — помощник, который отвечает на вопросы.\n")
+            append("Отвечай кратко и по существу.\n\n")
+            append("Вопрос: $query")
+        }
+        return try {
+            llmClient.complete(prompt)
         } catch (e: Exception) {
             "Ошибка генерации ответа: ${e.message}"
         }
