@@ -6,6 +6,7 @@ import com.tishukoff.feature.rag.impl.data.chunking.StructuralChunker
 import com.tishukoff.feature.rag.impl.data.local.RagDatabase
 import com.tishukoff.feature.rag.impl.data.remote.AnthropicLlmClient
 import com.tishukoff.feature.rag.impl.data.remote.OllamaEmbeddingClient
+import com.tishukoff.feature.rag.impl.data.remote.OllamaLlmClient
 import com.tishukoff.feature.rag.impl.data.repository.RagRepositoryImpl
 import com.tishukoff.feature.rag.impl.domain.repository.LlmClient
 import com.tishukoff.feature.rag.impl.domain.repository.RagRepository
@@ -30,11 +31,24 @@ val ragModule = module {
     single { FixedSizeChunker() }
     single { StructuralChunker() }
     single<RagRepository> { RagRepositoryImpl(get(), get(), get(), get()) }
-    single<LlmClient> { AnthropicLlmClient(get(named("anthropicApiKey"))) }
+    single<LlmClient>(named("cloud")) { AnthropicLlmClient(get(named("anthropicApiKey"))) }
+    single<LlmClient>(named("local")) { OllamaLlmClient() }
     factory { IndexDocumentsUseCase(get()) }
     factory { SearchDocumentsUseCase(get()) }
-    factory { RewriteQueryUseCase(get()) }
-    factory { RerankChunksUseCase(get()) }
-    factory { ExtractTaskStateUseCase(get()) }
-    viewModel { RagViewModel(get(), get(), get(), get(named("anthropicApiKey")), get(), get(), get(), get(), get()) }
+    factory { RewriteQueryUseCase(get(named("cloud"))) }
+    factory { RerankChunksUseCase(get(named("cloud"))) }
+    factory { ExtractTaskStateUseCase(get(named("cloud"))) }
+    viewModel {
+        RagViewModel(
+            context = get(),
+            indexDocumentsUseCase = get(),
+            searchDocumentsUseCase = get(),
+            ragRepository = get(),
+            cloudLlmClient = get(named("cloud")),
+            localLlmClient = get(named("local")),
+            rewriteQueryUseCase = get(),
+            rerankChunksUseCase = get(),
+            extractTaskStateUseCase = get(),
+        )
+    }
 }
