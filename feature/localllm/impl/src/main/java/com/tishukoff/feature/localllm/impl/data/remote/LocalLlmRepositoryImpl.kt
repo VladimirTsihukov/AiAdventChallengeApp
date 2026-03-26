@@ -1,5 +1,6 @@
 package com.tishukoff.feature.localllm.impl.data.remote
 
+import com.tishukoff.feature.localllm.impl.domain.model.LlmConfig
 import com.tishukoff.feature.localllm.impl.domain.model.LocalLlmMessage
 import com.tishukoff.feature.localllm.impl.domain.repository.LocalLlmRepository
 
@@ -7,7 +8,10 @@ internal class LocalLlmRepositoryImpl(
     private val ollamaClient: OllamaGenerateClient,
 ) : LocalLlmRepository {
 
-    override suspend fun sendMessage(messages: List<LocalLlmMessage>): String {
+    override suspend fun sendMessage(
+        messages: List<LocalLlmMessage>,
+        config: LlmConfig,
+    ): String {
         val ollamaMessages = messages.map { msg ->
             val role = when (msg.role) {
                 LocalLlmMessage.Role.USER -> "user"
@@ -15,6 +19,6 @@ internal class LocalLlmRepositoryImpl(
             }
             role to msg.text
         }
-        return ollamaClient.chat(ollamaMessages)
+        return ollamaClient.chat(ollamaMessages, config)
     }
 }
