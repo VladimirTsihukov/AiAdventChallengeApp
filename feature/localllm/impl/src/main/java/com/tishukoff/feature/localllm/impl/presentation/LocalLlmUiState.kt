@@ -1,6 +1,7 @@
 package com.tishukoff.feature.localllm.impl.presentation
 
 import com.tishukoff.feature.localllm.impl.domain.model.BenchmarkComparison
+import com.tishukoff.feature.localllm.impl.domain.model.BenchmarkEntry
 import com.tishukoff.feature.localllm.impl.domain.model.LlmConfig
 import com.tishukoff.feature.localllm.impl.domain.model.LocalLlmMessage
 
@@ -16,6 +17,10 @@ data class LocalLlmUiState(
     val config: LlmConfig = LlmConfig.DEFAULT,
     val isSettingsExpanded: Boolean = false,
     val isBenchmarkRunning: Boolean = false,
-    val benchmarkProgress: String = "",
+    val benchmarkCurrentQuestion: String = "",
+    val benchmarkCurrentConfig: String = "",
+    val benchmarkQuestionIndex: Int = 0,
+    val benchmarkTotalQuestions: Int = 0,
+    val benchmarkLiveEntries: List<BenchmarkEntry> = emptyList(),
     val benchmarkResult: BenchmarkComparison? = null,
 )

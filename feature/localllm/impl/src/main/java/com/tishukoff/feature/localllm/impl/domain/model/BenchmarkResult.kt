@@ -11,6 +11,24 @@ data class BenchmarkEntry(
 )
 
 /**
+ * Промежуточное событие прогресса бенчмарка.
+ */
+sealed interface BenchmarkEvent {
+    data class AskingQuestion(
+        val questionIndex: Int,
+        val totalQuestions: Int,
+        val question: String,
+        val configLabel: String,
+    ) : BenchmarkEvent
+
+    data class EntryCompleted(val entry: BenchmarkEntry) : BenchmarkEvent
+
+    data class SuiteCompleted(val configLabel: String) : BenchmarkEvent
+
+    data class Finished(val comparison: BenchmarkComparison) : BenchmarkEvent
+}
+
+/**
  * Полный результат сравнительного бенчмарка — "до" и "после" оптимизации.
  */
 data class BenchmarkComparison(
