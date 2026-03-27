@@ -2,10 +2,13 @@ package com.tishukoff.feature.localllm.impl.presentation
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.tishukoff.feature.localllm.impl.data.remote.OllamaGenerateClient
 import com.tishukoff.feature.localllm.impl.domain.model.BenchmarkEvent
 import com.tishukoff.feature.localllm.impl.domain.model.LlmConfig
 import com.tishukoff.feature.localllm.impl.domain.model.LocalLlmMessage
+import com.tishukoff.feature.localllm.impl.domain.usecase.CheckServerHealthUseCase
 import com.tishukoff.feature.localllm.impl.domain.usecase.RunBenchmarkUseCase
+import com.tishukoff.feature.localllm.impl.domain.usecase.RunStabilityTestUseCase
 import com.tishukoff.feature.localllm.impl.domain.usecase.SendMessageUseCase
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -17,6 +20,9 @@ import kotlinx.coroutines.launch
 class LocalLlmViewModel internal constructor(
     private val sendMessageUseCase: SendMessageUseCase,
     private val runBenchmarkUseCase: RunBenchmarkUseCase,
+    private val checkServerHealthUseCase: CheckServerHealthUseCase,
+    private val runStabilityTestUseCase: RunStabilityTestUseCase,
+    private val ollamaClient: OllamaGenerateClient,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(LocalLlmUiState())
@@ -53,6 +59,17 @@ class LocalLlmViewModel internal constructor(
                     it.copy(benchmarkResult = null, benchmarkLiveEntries = emptyList())
                 }
             }
+            is LocalLlmIntent.ToggleServerStatus -> {
+                _uiState.update {
+                    it.copy(isServerStatusExpanded = !it.isServerStatusExpanded)
+                }
+            }
+            is LocalLlmIntent.CheckHealth -> checkHealth()
+            is LocalLlmIntent.RunStabilityTest -> runStabilityTest()
+            is LocalLlmIntent.UpdateServerIp -> {
+                _uiState.update { it.copy(serverIp = intent.ip) }
+            }
+            is LocalLlmIntent.ApplyServerIp -> applyServerIp()
         }
     }
 
@@ -164,6 +181,78 @@ class LocalLlmViewModel internal constructor(
                     }
                 }
             }
+        }
+    }
+
+    private fun checkHealth() {
+        if (_uiState.value.isCheckingHealth) return
+
+        _uiState.update { it.copy(isCheckingHealth = true) }
+
+        viewModelScope.launch {
+            val result = checkServerHealthUseCase()
+            result.fold(
+                onSuccess = { status ->
+                    _uiState.update {
+                        it.copy(
+                            serverStatus = status,
+                            isCheckingHealth = false,
+                            requestsInLastMinute = ollamaClient.getRequestsInLastMinute(),
+                        )
+                    }
+                },
+                onFailure = { error ->
+                    _uiState.update {
+                        it.copy(
+                            isCheckingHealth = false,
+                            error = "Health check failed: ${error.message}",
+                        )
+                    }
+                },
+            )
+        }
+    }
+
+    private fun runStabilityTest() {
+        if (_uiState.value.isStabilityTestRunning) return
+
+        _uiState.update { it.copy(isStabilityTestRunning = true, stabilityTestResult = null) }
+
+        viewModelScope.launch {
+            val result = runStabilityTestUseCase(
+                concurrentRequests = _uiState.value.rateLimitConfig.maxConcurrentRequests + 3,
+                config = _uiState.value.config,
+            )
+            result.fold(
+                onSuccess = { testResult ->
+                    _uiState.update {
+                        it.copy(
+                            stabilityTestResult = testResult,
+                            isStabilityTestRunning = false,
+                            requestsInLastMinute = ollamaClient.getRequestsInLastMinute(),
+                        )
+                    }
+                },
+                onFailure = { error ->
+                    _uiState.update {
+                        it.copy(
+                            isStabilityTestRunning = false,
+                            error = "Stability test failed: ${error.message}",
+                        )
+                    }
+                },
+            )
+        }
+    }
+
+    private fun applyServerIp() {
+        val newUrl = _uiState.value.serverIp.trim()
+        if (newUrl.isBlank()) return
+
+        viewModelScope.launch {
+            ollamaClient.updateBaseUrl(newUrl)
+            _uiState.update { it.copy(serverStatus = null, stabilityTestResult = null) }
+            checkHealth()
         }
     }
 }
