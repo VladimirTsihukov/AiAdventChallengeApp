@@ -2,6 +2,7 @@ package com.tishukoff.feature.localllm.impl.presentation
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.tishukoff.feature.localllm.impl.domain.model.BenchmarkEvent
 import com.tishukoff.feature.localllm.impl.domain.model.LlmConfig
 import com.tishukoff.feature.localllm.impl.domain.model.LocalLlmMessage
 import com.tishukoff.feature.localllm.impl.domain.usecase.RunBenchmarkUseCase
@@ -9,6 +10,7 @@ import com.tishukoff.feature.localllm.impl.domain.usecase.SendMessageUseCase
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -47,7 +49,9 @@ class LocalLlmViewModel internal constructor(
             }
             is LocalLlmIntent.RunBenchmark -> runBenchmark()
             is LocalLlmIntent.DismissBenchmark -> {
-                _uiState.update { it.copy(benchmarkResult = null) }
+                _uiState.update {
+                    it.copy(benchmarkResult = null, benchmarkLiveEntries = emptyList())
+                }
             }
         }
     }
@@ -104,40 +108,62 @@ class LocalLlmViewModel internal constructor(
         _uiState.update {
             it.copy(
                 isBenchmarkRunning = true,
-                benchmarkProgress = "Запуск бенчмарка...",
+                benchmarkLiveEntries = emptyList(),
+                benchmarkCurrentQuestion = "",
+                benchmarkCurrentConfig = "",
+                benchmarkQuestionIndex = 0,
+                benchmarkTotalQuestions = 0,
                 benchmarkResult = null,
                 error = null,
             )
         }
 
         viewModelScope.launch {
-            _uiState.update { it.copy(benchmarkProgress = "Тестирование дефолтной конфигурации...") }
-
-            val result = runBenchmarkUseCase(
+            runBenchmarkUseCase(
                 defaultConfig = LlmConfig.DEFAULT,
                 optimizedConfig = _uiState.value.config,
-            )
-
-            result.fold(
-                onSuccess = { comparison ->
-                    _uiState.update {
-                        it.copy(
-                            isBenchmarkRunning = false,
-                            benchmarkProgress = "",
-                            benchmarkResult = comparison,
-                        )
+            ).catch { error ->
+                _uiState.update {
+                    it.copy(
+                        isBenchmarkRunning = false,
+                        error = "Benchmark error: ${error.message}",
+                    )
+                }
+            }.collect { event ->
+                when (event) {
+                    is BenchmarkEvent.AskingQuestion -> {
+                        _uiState.update {
+                            it.copy(
+                                benchmarkCurrentQuestion = event.question,
+                                benchmarkCurrentConfig = event.configLabel,
+                                benchmarkQuestionIndex = event.questionIndex,
+                                benchmarkTotalQuestions = event.totalQuestions,
+                            )
+                        }
                     }
-                },
-                onFailure = { error ->
-                    _uiState.update {
-                        it.copy(
-                            isBenchmarkRunning = false,
-                            benchmarkProgress = "",
-                            error = "Benchmark error: ${error.message}",
-                        )
+                    is BenchmarkEvent.EntryCompleted -> {
+                        _uiState.update {
+                            it.copy(
+                                benchmarkLiveEntries = it.benchmarkLiveEntries + event.entry,
+                            )
+                        }
                     }
-                },
-            )
+                    is BenchmarkEvent.SuiteCompleted -> {
+                        _uiState.update {
+                            it.copy(benchmarkCurrentQuestion = "")
+                        }
+                    }
+                    is BenchmarkEvent.Finished -> {
+                        _uiState.update {
+                            it.copy(
+                                isBenchmarkRunning = false,
+                                benchmarkCurrentQuestion = "",
+                                benchmarkResult = event.comparison,
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }

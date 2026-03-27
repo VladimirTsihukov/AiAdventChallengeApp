@@ -125,15 +125,15 @@ fun LocalLlmChatScreen(
                 SettingsPanel(state = state, onIntent = viewModel::handleIntent)
             }
 
+            if (state.isBenchmarkRunning || state.benchmarkLiveEntries.isNotEmpty()) {
+                BenchmarkLivePanel(state = state)
+            }
+
             state.benchmarkResult?.let { result ->
                 BenchmarkResultPanel(
                     result = result,
                     onDismiss = { viewModel.handleIntent(LocalLlmIntent.DismissBenchmark) },
                 )
-            }
-
-            if (state.isBenchmarkRunning) {
-                BenchmarkProgressPanel(progress = state.benchmarkProgress)
             }
 
             val listState = rememberLazyListState()
@@ -354,22 +354,136 @@ private fun SliderSetting(
 }
 
 @Composable
-private fun BenchmarkProgressPanel(progress: String) {
+private fun BenchmarkLivePanel(state: LocalLlmUiState) {
+    val liveListState = rememberLazyListState()
+
+    LaunchedEffect(state.benchmarkLiveEntries.size, state.benchmarkCurrentQuestion) {
+        val totalItems = state.benchmarkLiveEntries.size +
+            (if (state.benchmarkCurrentQuestion.isNotEmpty()) 1 else 0)
+        if (totalItems > 0) {
+            liveListState.animateScrollToItem(totalItems - 1)
+        }
+    }
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
+            .height(300.dp)
             .padding(8.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.tertiaryContainer,
         ),
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Бенчмарк",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                )
+                if (state.isBenchmarkRunning && state.benchmarkTotalQuestions > 0) {
+                    Text(
+                        text = "[${state.benchmarkCurrentConfig}] " +
+                            "${state.benchmarkQuestionIndex}/${state.benchmarkTotalQuestions}",
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                }
+            }
+
+            if (state.isBenchmarkRunning) {
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                )
+            }
+
+            LazyColumn(
+                state = liveListState,
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                items(
+                    items = state.benchmarkLiveEntries,
+                    key = { "${it.configLabel}_${it.question}" },
+                ) { entry ->
+                    BenchmarkLiveEntry(entry = entry)
+                }
+
+                if (state.benchmarkCurrentQuestion.isNotEmpty() && state.isBenchmarkRunning) {
+                    item(key = "current_question") {
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            ),
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        text = "[${state.benchmarkCurrentConfig}]",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                    Text(
+                                        text = state.benchmarkCurrentQuestion,
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BenchmarkLiveEntry(entry: BenchmarkEntry) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+        ),
+    ) {
+        Column(modifier = Modifier.padding(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = "[${entry.configLabel}]",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (entry.configLabel == "По умолчанию") {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.primary
+                    },
+                )
+                Text(
+                    text = "${entry.durationMs} мс",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
             Text(
-                text = progress,
-                style = MaterialTheme.typography.bodyMedium,
+                text = entry.question,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.Bold,
             )
-            Spacer(modifier = Modifier.height(8.dp))
-            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            Text(
+                text = entry.answer.take(150) + if (entry.answer.length > 150) "..." else "",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
