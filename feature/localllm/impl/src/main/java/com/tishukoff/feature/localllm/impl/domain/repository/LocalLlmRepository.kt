@@ -1,5 +1,6 @@
 package com.tishukoff.feature.localllm.impl.domain.repository
 
+import com.tishukoff.feature.localllm.impl.domain.model.LlmConfig
 import com.tishukoff.feature.localllm.impl.domain.model.LocalLlmMessage
 
 /**
@@ -9,6 +10,12 @@ internal interface LocalLlmRepository {
 
     /**
      * Отправляет историю сообщений и возвращает ответ модели.
+     *
+     * @param messages история диалога
+     * @param config конфигурация параметров LLM
      */
-    suspend fun sendMessage(messages: List<LocalLlmMessage>): String
+    suspend fun sendMessage(
+        messages: List<LocalLlmMessage>,
+        config: LlmConfig = LlmConfig.DEFAULT,
+    ): String
 }
