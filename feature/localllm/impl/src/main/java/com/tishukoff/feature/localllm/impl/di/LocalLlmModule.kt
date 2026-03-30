@@ -6,8 +6,10 @@ import com.tishukoff.feature.localllm.impl.data.remote.TelegramBotApiClient
 import com.tishukoff.feature.localllm.impl.data.remote.TelegramBotRepositoryImpl
 import com.tishukoff.feature.localllm.impl.domain.repository.LocalLlmRepository
 import com.tishukoff.feature.localllm.impl.domain.repository.TelegramBotRepository
+import com.tishukoff.feature.localllm.impl.domain.usecase.CheckServerHealthUseCase
 import com.tishukoff.feature.localllm.impl.domain.usecase.GetTelegramBotChatsUseCase
 import com.tishukoff.feature.localllm.impl.domain.usecase.RunBenchmarkUseCase
+import com.tishukoff.feature.localllm.impl.domain.usecase.RunStabilityTestUseCase
 import com.tishukoff.feature.localllm.impl.domain.usecase.SendMessageUseCase
 import com.tishukoff.feature.localllm.impl.presentation.LocalLlmViewModel
 import com.tishukoff.feature.localllm.impl.presentation.telegrambot.TelegramBotViewModel
@@ -19,7 +21,9 @@ val localLlmModule = module {
     single<LocalLlmRepository> { LocalLlmRepositoryImpl(get()) }
     factory { SendMessageUseCase(get()) }
     factory { RunBenchmarkUseCase(get()) }
-    viewModel { LocalLlmViewModel(get(), get()) }
+    factory { CheckServerHealthUseCase(get()) }
+    factory { RunStabilityTestUseCase(get()) }
+    viewModel { LocalLlmViewModel(get(), get(), get(), get(), get()) }
 
     single { TelegramBotApiClient() }
     single<TelegramBotRepository> { TelegramBotRepositoryImpl(get()) }

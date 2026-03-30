@@ -23,4 +23,10 @@ sealed interface LocalLlmIntent {
 
     data object RunBenchmark : LocalLlmIntent
     data object DismissBenchmark : LocalLlmIntent
+
+    data object ToggleServerStatus : LocalLlmIntent
+    data object CheckHealth : LocalLlmIntent
+    data object RunStabilityTest : LocalLlmIntent
+    data class UpdateServerIp(val ip: String) : LocalLlmIntent
+    data object ApplyServerIp : LocalLlmIntent
 }
